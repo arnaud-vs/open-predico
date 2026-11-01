@@ -15,3 +15,11 @@ def test_slot_climatology_shape_order_and_dst():
     assert (fc.q10 <= fc.q50).all() and (fc.q50 <= fc.q90).all()
     noon = fc.tz_convert("Europe/Madrid").at_time("12:00")
     assert (noon.q50.round() == 48).all()  # slot pattern carried to the right local time
+
+
+def test_slot_climatology_single_dst_days():
+    idx = pd.date_range("2026-02-01", "2026-03-28", freq="15min", tz="UTC", inclusive="left")
+    history = pd.Series(1.0, index=idx)
+    for day, n in (("2026-03-29", 92), ("2026-10-25", 100)):
+        fc = slot_climatology(history, pd.DatetimeIndex([pd.Timestamp(day, tz="Europe/Madrid")]))
+        assert len(fc) == n

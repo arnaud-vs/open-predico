@@ -20,7 +20,7 @@ def slot_climatology(
     by_slot.columns = [f"q{round(q * 100)}" for q in QUANTILES]
 
     grid = pd.date_range(
-        target_days.min(), target_days.max() + pd.Timedelta(days=1), freq="15min", inclusive="left"
+        target_days.min(), target_days.max() + pd.DateOffset(days=1), freq="15min", inclusive="left"
     )  # target_days are local midnights, so DST days get 92 or 100 slots
     out = by_slot.reindex(_slot(grid)).set_axis(grid)
     return out.tz_convert("UTC")

@@ -17,12 +17,13 @@ This document records the decisions made before coding and why. Change it via PR
 open-predico/
 ├── src/openpredico/
 │   ├── config.py         # read + validate TOML configs
-│   ├── data/             # sources (esios.py, hf.py), load(), groups/, transforms.py
+│   ├── data/             # sources (esios.py, hf.py), groups.py runner, transforms.py
 │   ├── models/           # baselines.py, ml/, tsfm/
 │   ├── evaluation/       # backtest.py, metrics.py, score.py
 │   └── live/             # predico.py, submit.py, publish.py
 ├── configs/
 │   ├── targets.toml
+│   ├── groups.toml
 │   ├── experiments/*.toml
 │   └── live/<target>.toml
 ├── results/<config>.csv  # official benchmark results, one file per config
@@ -37,7 +38,7 @@ Each target is an entry in `configs/targets.toml`: Predico resource name, truth 
 
 ## Data and features
 
-- **Feature group** = one file in `data/groups/` with a `build(start, end)` function returning a frame on the 15-min UTC grid, plus metadata: source ids, license, and each column's **maximum availability** (`future` = known for the target day before the gate, e.g. day-ahead price; `past` = only known up to the origin, e.g. mFRR actuals).
+- **Feature groups** are declared in `configs/groups.toml`: one table per group, one line per column (`source = "esios:<id>"`, optional `geo`, `fill`, and the column's **maximum availability**: `future` = known for the target day before the gate, e.g. day-ahead price; `past` = only known up to the origin, e.g. mFRR actuals). One generic runner (`data/groups.py`) builds any group on the 15-min UTC grid; hourly series are repeated per quarter-hour. A new ESIOS feature is one TOML line; a new source is one fetch module (`entsoe:`, `calendar:` for computed columns).
 - The same `build()` produces benchmark history and live inputs, so there is no train/serve skew.
 - Groups hold cleaned, near-raw signals. Feature engineering lives in `data/transforms.py` and is selected per experiment.
 - **No duplicates:** CI fails if two groups share a source id or a column name.
@@ -84,8 +85,8 @@ Rules enforced by the harness:
 - Output is always sorted (no quantile crossing); clipping follows the target kind.
 - TSFMs forecast from the end of their context, so they roll through the gap between origin and target day; those steps are discarded. ML models predict the target day directly.
 - `context_days` is a config choice, capped by each model's maximum context.
-- Each TSFM is an optional install (`pip install openpredico[chronos2]`) because their dependencies conflict. Models without covariate support run univariate.
-- **v1 TSFMs:** Chronos-2, TimesFM 3, Timestral (5M and 209M), T0-gamma (weights to confirm), Toto (CPU support to confirm).
+- Each TSFM is an optional install (`pip install openpredico[chronos2]`) because their dependencies conflict. Every TSFM runs with covariates (past + known-future); models without covariate support are not in v1. No univariate TSFM runs; baselines are the reference.
+- **v1 TSFMs:** Chronos-2, TimesFM 3, Timestral (5M and 209M), T0-gamma (weights and covariate support to confirm), Toto (CPU and covariate support to confirm).
 - **Baselines:** persistence, slot climatology (quantiles per local 15-min slot, last 28 days, weekdays pooled: per-weekday scored worse on 2026 data), zero-inflated climatology.
 
 ## Benchmark
@@ -95,7 +96,7 @@ Rules enforced by the harness:
 - **Rolling origin:** for each target day, origin = 13:00 Madrid on D-1 (the live run time, not the gate), so the backtest never sees more than live does.
 - **Storage:** Parquet on Hugging Face (`open-predico/benchmark`), versioned (`v1`, `v2`, …). New feature groups are contributed as build scripts; the maintainer publishes the next dataset version. No data files in git.
 - **Known limitation:** some ESIOS forecast indicators are overwritten after publication, so their historical values are approximate. Flagged per feature. Live runs store their exact inputs, which gives true vintages going forward.
-- **Target data quality (ESIOS, 2025-11 to 2026-10):** ~1.5% of quarter-hours missing in both 10250 and 2197 (263 in Nov 2025, rest scattered, gaps ≤ 2 h). Treated as no activation: volume = 0. Price: fill with the first bid that would have been activated (lowest upward / highest downward); needs mFRR bid data, source to find. Until then price = NaN (baseline ignores it). Predico's scoring of missing truth is unknown; to confirm. Values hit 1500 (MWh and EUR/MWh) once each in the year; read as a cap, kept as is.
+- **Target data quality (ESIOS, 2025-11 to 2026-10):** ~1.5% of quarter-hours missing in both 10250 and 2197 (263 in Nov 2025, rest scattered, gaps ≤ 2 h). Treated as no activation: volume = 0. Price: fill with the mid-price of the first bids that would be activated, (lowest upward + highest downward) / 2; needs mFRR bid data, source to find. Until then price = NaN (baseline ignores it). Predico's scoring of missing truth is unknown; to confirm. Values hit 1500 (MWh and EUR/MWh) once each in the year; read as a cap, kept as is.
 
 ## Evaluation
 
@@ -114,7 +115,7 @@ Rules enforced by the harness:
 - **`submit`:** build features → predict → validate (full grid, no NaN, sorted, ≤ 240 h) → submit → check coverage → save forecast and exact inputs to HF `live-private`. Never prints forecast values (Actions logs are public).
 - **`publish`:** after gate closure, copy closed days to public HF `live`; fetch actuals and Predico's official scores for us; recompute scores until the month freezes (day 7 of the next month); fail if today's submission is missing.
 - **Monitoring:** GitHub failure emails plus the `publish` check (which catches skipped scheduled runs).
-- **Secrets:** GitHub `production` environment, `main` only: `HF_TOKEN` (fine-grained, org-scoped), `ESIOS_TOKEN`, `PREDICO_EMAIL`, `PREDICO_PASSWORD`.
+- **Secrets:** GitHub `production` environment, `main` only: `HF_TOKEN` (fine-grained, org-scoped), `ESIOS_TOKEN`, `ENTSOE_API_KEY`, `PREDICO_EMAIL`, `PREDICO_PASSWORD`.
 - **Before go-live:** dry run on the Predico playground; historical forecast export from the backtest if required.
 
 ## Predico rules that shape the repo
