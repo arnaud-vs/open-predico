@@ -1,0 +1,62 @@
+# Feature groups. See PLAN.md > Data and features.
+#
+# One table per group, one line per column:
+#   source       "esios:<id>" or "calendar:<name>" (computed)
+#   geo          ESIOS geo_id, for indicators published for several geos
+#   fill         value for missing quarter-hours (none = keep NaN)
+#   availability "future" = known for the target day before the gate
+#                "past"   = only known up to the forecast origin
+
+[target]
+mfrr_energy = { source = "esios:10250", fill = 0, availability = "past" }
+mfrr_price = { source = "esios:2197", availability = "past" }  # fill: bid mid-price, pending
+
+[mfrr]
+mfrr_abs_volume = { source = "esios:10055", availability = "past" }
+mfrr_down = { source = "esios:10394", availability = "past" }
+mfrr_up = { source = "esios:10395", availability = "past" }
+mfrr_inelastic_requested_up = { source = "esios:2184", availability = "past" }
+mfrr_inelastic_requested_down = { source = "esios:2185", availability = "past" }
+mfrr_direct_requested_up = { source = "esios:2188", availability = "past" }
+mfrr_direct_requested_down = { source = "esios:2189", availability = "past" }
+mfrr_inelastic_covered_up = { source = "esios:2192", availability = "past" }
+mfrr_inelastic_covered_down = { source = "esios:2193", availability = "past" }
+
+[da_market]
+da_price_es = { source = "esios:600", geo = 3, availability = "future" }  # Spain
+da_price_pt = { source = "esios:600", geo = 1, availability = "future" }  # Portugal
+da_price_fr = { source = "esios:600", geo = 2, availability = "future" }  # France
+da_price_de = { source = "esios:600", geo = 8826, availability = "future" }  # Germany
+da_price_be = { source = "esios:600", geo = 8827, availability = "future" }  # Belgium
+da_price_nl = { source = "esios:600", geo = 8828, availability = "future" }  # Netherlands
+
+[ree_forecasts]
+demand_forecast = { source = "esios:1775", availability = "future" }
+wind_forecast = { source = "esios:1777", availability = "future" }
+solar_pv_forecast = { source = "esios:1779", availability = "future" }
+residual_demand_forecast = { source = "esios:10249", availability = "future" }
+
+[balancing]
+afrr_price_up = { source = "esios:10389", availability = "past" }
+afrr_price_down = { source = "esios:10390", availability = "past" }
+afrr_net_volume = { source = "esios:10252", availability = "past" }
+imbalance_net_volume = { source = "esios:1338", availability = "past" }
+imbalance_price_up = { source = "esios:686", availability = "past" }
+imbalance_price_down = { source = "esios:687", availability = "past" }
+
+[xborder]
+pbf_net_fr = { source = "esios:10104", availability = "future" }
+pbf_net_pt = { source = "esios:10113", availability = "future" }
+pbf_net_total = { source = "esios:10186", availability = "future" }
+ntc_fr_import = { source = "esios:1844", availability = "future" }
+ntc_fr_export = { source = "esios:1848", availability = "future" }
+ntc_pt_import = { source = "esios:1845", availability = "future" }
+ntc_pt_export = { source = "esios:1849", availability = "future" }
+p48_net_fr = { source = "esios:10015", availability = "past" }
+p48_net_pt = { source = "esios:10014", availability = "past" }
+
+[calendar]
+qh_of_day = { source = "calendar:qh_of_day", availability = "future" }
+weekday = { source = "calendar:weekday", availability = "future" }
+holiday_es = { source = "calendar:holiday_es", availability = "future" }
+dst_switch_day = { source = "calendar:dst_switch_day", availability = "future" }

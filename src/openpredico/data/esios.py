@@ -4,6 +4,7 @@ Needs a free personal token in the ESIOS_TOKEN environment variable.
 """
 
 import os
+import time
 
 import pandas as pd
 import requests
@@ -28,13 +29,18 @@ def fetch(indicator: int, start: str, end: str, geo_id: int | None = None) -> pd
     wrong for prices. Resample downstream with the right aggregation.
     """
     start, end = pd.Timestamp(start, tz="UTC"), pd.Timestamp(end, tz="UTC")
-    chunks = []
+    return to_series(fetch_values(indicator, start, end), indicator, geo_id, start, end)
+
+
+def fetch_values(indicator: int, start: pd.Timestamp, end: pd.Timestamp) -> list[dict]:
+    """Raw ESIOS `values` entries in [start, end), all geos; pass them to `to_series`."""
+    values = []
     t = start
     while t < end:
-        chunks.append(_get(indicator, t, min(t + CHUNK, end)))
+        values += _get(indicator, t, min(t + CHUNK, end))
         t += CHUNK
-    values = [v for chunk in chunks for v in chunk]
-    return to_series(values, indicator, geo_id, start, end)
+        time.sleep(1)  # ponytail: crude rate limit; ESIOS's WAF blocks bursts of requests
+    return values
 
 
 def _get(indicator: int, start: pd.Timestamp, end: pd.Timestamp) -> list[dict]:
