@@ -6,7 +6,7 @@ This document records the decisions made before coding and why. Change it via PR
 
 ## Scope
 
-- **Launch target:** Spain mFRR (EDP program) — `spain_mfrr_energy` (MWh, signed) and `spain_mfrr_price` (EUR/MWh, many exact zeros). Day-ahead, 15-min resolution, gate closure 17:00 CET D-1. Ground truth: ESIOS indicators 10250 and 2197.
+- **Launch target:** Spain mFRR (EDP program) — `spain_mfrr_energy` (MWh, signed) and `spain_mfrr_price` (EUR/MWh, ~7% exact zeros, almost all in quarter-hours with net downward activation). Day-ahead, 15-min resolution, gate closure 17:00 CET D-1. Ground truth: ESIOS indicators 10250 and 2197.
 - **Next:** 50Hertz wind (`germany_wind_50hertz_ca`, gate 15:00 CET D-1). More targets are configuration, not code.
 - **Main forecasting engines:** time-series foundation models (TSFMs). ML models (LightGBM) and simple baselines are benchmarked alongside.
 - No public benchmark exists for Spanish mFRR. Building one is part of the goal.
@@ -41,7 +41,7 @@ Each target is an entry in `configs/targets.toml`: Predico resource name, truth 
 - The same `build()` produces benchmark history and live inputs, so there is no train/serve skew.
 - Groups hold cleaned, near-raw signals. Feature engineering lives in `data/transforms.py` and is selected per experiment.
 - **No duplicates:** CI fails if two groups share a source id or a column name.
-- **v1 groups (ESIOS):** target history, day-ahead market (OMIE price), REE D+1 forecasts (demand, wind, solar), balancing (aFRR/RR, imbalance), REE cross-border exchanges, calendar (computed). Weather and other countries' TSO data later.
+- **v1 groups (ESIOS):** target history, day-ahead market (OMIE price), REE D+1 forecasts (demand, wind, solar), balancing (aFRR, imbalance; RR dropped: Spain left TERRE end of 2025, no data after 2025-12-30), REE cross-border exchanges (future: PBF net schedule FR/PT/total 10104/10113/10186 and NTC D-1 forecasts 1844/1848/1845/1849; past: P48 net 10015/10014; skip Morocco, Andorra and revised NTC 488), calendar (computed: quarter-hour, weekday, Spanish national holidays, DST-switch days; no regional holidays in v1). Weather and other countries' TSO data later.
 - **Time:** UTC everywhere; local time only inside calendar features.
 
 ## Experiment configs
@@ -86,14 +86,16 @@ Rules enforced by the harness:
 - `context_days` is a config choice, capped by each model's maximum context.
 - Each TSFM is an optional install (`pip install openpredico[chronos2]`) because their dependencies conflict. Models without covariate support run univariate.
 - **v1 TSFMs:** Chronos-2, TimesFM 3, Timestral (5M and 209M), T0-gamma (weights to confirm), Toto (CPU support to confirm).
-- **Baselines:** persistence, weekly-pattern climatology (quantiles per 15-min slot × weekday), zero-inflated climatology.
+- **Baselines:** persistence, slot climatology (quantiles per local 15-min slot, last 28 days, weekdays pooled: per-weekday scored worse on 2026 data), zero-inflated climatology.
 
 ## Benchmark
 
-- **Test period:** 1 Nov 2025 – 31 Oct 2026, one year, no validation split. ML models handle their own train/validation split without leakage.
+- **History start:** 10 Dec 2024 (Spain joins MARI; mFRR price 2197 starts that day). Earlier data is a different market design (old tertiary prices 676/677, ~20% no-activation quarter-hours); optional for volume pretraining only. Day-ahead price is hourly-repeated until 30 Sep 2025. All 15-min series have a gap 28 Apr – 6 May 2025 (Iberian blackout).
+- **Test period:** 1 Nov 2025 – 31 Oct 2026, one year, no validation split. Report results per month too: levels and spread shift inside the year (price mean ~100 → ~157 EUR/MWh in Jul–Oct 2026). ML models handle their own train/validation split without leakage.
 - **Rolling origin:** for each target day, origin = 13:00 Madrid on D-1 (the live run time, not the gate), so the backtest never sees more than live does.
 - **Storage:** Parquet on Hugging Face (`open-predico/benchmark`), versioned (`v1`, `v2`, …). New feature groups are contributed as build scripts; the maintainer publishes the next dataset version. No data files in git.
 - **Known limitation:** some ESIOS forecast indicators are overwritten after publication, so their historical values are approximate. Flagged per feature. Live runs store their exact inputs, which gives true vintages going forward.
+- **Target data quality (ESIOS, 2025-11 to 2026-10):** ~1.5% of quarter-hours missing in both 10250 and 2197 (263 in Nov 2025, rest scattered, gaps ≤ 2 h). Treated as no activation: volume = 0. Price: fill with the first bid that would have been activated (lowest upward / highest downward); needs mFRR bid data, source to find. Until then price = NaN (baseline ignores it). Predico's scoring of missing truth is unknown; to confirm. Values hit 1500 (MWh and EUR/MWh) once each in the year; read as a cap, kept as is.
 
 ## Evaluation
 
@@ -106,7 +108,7 @@ Rules enforced by the harness:
 
 ## Live operations
 
-- **Continuous submission only:** one forecast per day covering D+1 to D+10. Predico slices it at each gate closure. If a run fails, yesterday's forecast still covers tomorrow. D+1 comes from the live config, D+2 to D+10 from the weekly-pattern baseline.
+- **Continuous submission only:** one forecast per day covering D+1 to D+10. Predico slices it at each gate closure. If a run fails, yesterday's forecast still covers tomorrow. D+1 comes from the live config, D+2 to D+10 from the slot-climatology baseline. EDP program pays D+1 only (Predico programs page, Nov 2026), so D+2 to D+10 exist only as a fallback.
 - **Schedule (GitHub Actions, UTC):** `submit` at 13:00 (14:00 CET / 15:00 CEST, after OMIE results) with a retry at 14:00 (≥1 h before the gate in both CET and CEST); `publish` at 16:30.
 - **Late features:** filled with NaN and recorded; the retry submits the full forecast if the data has arrived. The latest submission counts.
 - **`submit`:** build features → predict → validate (full grid, no NaN, sorted, ≤ 240 h) → submit → check coverage → save forecast and exact inputs to HF `live-private`. Never prints forecast values (Actions logs are public).

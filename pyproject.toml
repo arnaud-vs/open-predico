@@ -6,6 +6,7 @@ readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.12"
 dependencies = [
+    "huggingface_hub>=0.34",
     "pandas>=2.2",
     "pyarrow>=17",
     "requests>=2.32",
