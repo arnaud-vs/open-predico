@@ -1,0 +1,16 @@
+# Never publish PDFs (research papers, private docs)
+*.pdf
+
+# Local data cache and outputs (data lives on Hugging Face, not in git)
+/data/
+/predictions/
+
+# Python
+__pycache__/
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Local secrets
+.env

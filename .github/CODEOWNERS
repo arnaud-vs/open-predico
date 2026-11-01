@@ -1,0 +1,5 @@
+# The maintainer reviews everything; live code, workflows and live configs especially.
+*                       @arnaud-vs
+/src/openpredico/live/  @arnaud-vs
+/.github/workflows/     @arnaud-vs
+/configs/live/          @arnaud-vs

@@ -1,0 +1,25 @@
+[project]
+name = "openpredico"
+version = "0.0.1"
+description = "Open-source forecasting and benchmarking for the Predico collaborative forecasting platform"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.12"
+dependencies = [
+    "pandas>=2.2",
+    "pyarrow>=17",
+    "requests>=2.32",
+]
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

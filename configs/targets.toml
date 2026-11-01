@@ -1,0 +1,23 @@
+# One entry per forecasting target. See PLAN.md > Targets.
+#
+# kind:   "market"     -> no clipping, values may be negative
+#         "generation" -> clipped to [0, capacity]
+# origin: local time on D-1 when the forecast is made (live run time, used by the backtest)
+
+[spain_mfrr_energy]
+predico_resource = "spain_mfrr_energy"
+truth = "esios:10250"
+unit = "MWh"
+kind = "market"
+timezone = "Europe/Madrid"
+origin = "13:00"
+test_period = ["2025-11-01", "2026-10-31"]
+
+[spain_mfrr_price]
+predico_resource = "spain_mfrr_price"
+truth = "esios:2197"
+unit = "EUR/MWh"
+kind = "market"
+timezone = "Europe/Madrid"
+origin = "13:00"
+test_period = ["2025-11-01", "2026-10-31"]
