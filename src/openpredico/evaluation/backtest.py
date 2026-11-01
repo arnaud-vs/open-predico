@@ -1,6 +1,6 @@
 """Rolling-origin backtest: for each target day, forecast from what was known at the origin."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 import pandas as pd
 
@@ -10,19 +10,29 @@ PUBLICATION_LAG = pd.Timedelta(hours=2)
 
 
 def backtest(
-    predict: Callable[[pd.Series, pd.DatetimeIndex], pd.DataFrame],
-    history: pd.Series,
+    predict: Callable[..., pd.DataFrame],
+    history: pd.Series | pd.DataFrame,
     days: pd.DatetimeIndex,
-    origin: str = "13:00",
+    origin: str = "14:00",
+    future_cols: Sequence[str] = (),
 ) -> pd.DataFrame:
     """Concatenated D+1 forecasts for `days` (local midnights).
 
-    `predict(past, [day])` sees only values published before origin on D-1.
+    Series `history`: `predict(past, [day])` sees only values published before origin on D-1.
+    DataFrame `history` (target first): `predict(past, future, [day])`; `past` holds the other
+    columns up to that same cutoff, `future` the `future_cols` through the end of the target day.
     """
+    cols = list(future_cols)
     out = []
     for day in days:
         d1 = (day - pd.DateOffset(days=1)).date()  # calendar day: safe across DST
         cutoff = pd.Timestamp(f"{d1} {origin}").tz_localize(day.tz).tz_convert("UTC")
         past = history[history.index < cutoff - PUBLICATION_LAG]
-        out.append(predict(past, pd.DatetimeIndex([day])))
+        target = pd.DatetimeIndex([day])
+        if isinstance(history, pd.Series):
+            out.append(predict(past, target))
+            continue
+        stop = (day + pd.DateOffset(days=1)).tz_convert("UTC")
+        future = history.loc[history.index < stop, cols]
+        out.append(predict(past.drop(columns=cols), future, target))
     return pd.concat(out)

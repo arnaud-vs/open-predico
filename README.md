@@ -26,8 +26,10 @@ ESIOS ─► configs/groups.toml ─► feature frame (15-min UTC) ─► model 
 
 | Model | Energy RMSE | Energy Winkler | Price RMSE | Price Winkler |
 |---|---|---|---|---|
-| Slot climatology (baseline) | 262.8 | 972.5 | 48.5 | 163.3 |
-| Timestral-5M + covariates, 28-day context | _rerun pending_ | | | |
+| Slot climatology (baseline) | 262.6 | 971.3 | 48.5 | 163.1 |
+| Timestral-5M + covariates, 28-day context | **249.5** | **924.4** | **40.7** | **132.3** |
+
+Price is scored on 254 of 365 days: like Predico, a day with any missing truth is skipped. Per-month scores and the exact covariate set will move into `results/` once the benchmark dataset is published.
 
 ## Quickstart
 

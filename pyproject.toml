@@ -12,6 +12,13 @@ dependencies = [
     "requests>=2.32",
 ]
 
+[project.optional-dependencies]
+# ponytail: not on PyPI; unpinned GitHub install. Pin a commit once one is validated.
+timestral = ["timestral @ git+https://github.com/mistralai/timestral.git"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [dependency-groups]
 dev = ["pytest>=8", "ruff>=0.6"]
 
