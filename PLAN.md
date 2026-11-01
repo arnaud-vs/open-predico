@@ -127,9 +127,10 @@ Rules enforced by the harness:
 
 ## Dashboard
 
-Hugging Face Space (`open-predico/dashboard`): Streamlit run in the browser with stlite, so a free static Space (Docker and Gradio Spaces need a paid plan for orgs). Two tabs:
+Hugging Face Space (`open-predico/dashboard`): Streamlit run in the browser with stlite, so a free static Space (Docker and Gradio Spaces need a paid plan for orgs). Tabs:
 
-- **Backtest:** leaderboard, paired comparison between configs (share of days won), errors by hour/weekday/month.
+- **Backtest:** configs discovered from `predictions/backtest/*/` on HF. Leaderboard modelled on GIFT-Eval: one row per config with type (baseline / foundation model / ML), RMSE and Winkler per target normalised to `slot_climatology_28d` (ratio of mean daily scores on common days), coverage, aggregate score (geometric mean of the normalised scores) and rank. Win-rate matrix per metric (share of common days where A beats B), errors by month/hour/weekday, day viewer.
+- **Target data:** `v1/target.parquet` explored: time series (daily or 15-min window), patterns by quarter-hour/weekday/month, distribution, missing values and zeros per day, price vs energy.
 - **Live:** submitted forecasts vs actuals for any day, daily scores over time next to Predico's official score, rank if Predico allows publishing it.
 
 ## Repo meta
