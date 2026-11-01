@@ -127,7 +127,7 @@ Rules enforced by the harness:
 
 ## Dashboard
 
-Hugging Face Space (`open-predico/dashboard`, Streamlit) with two tabs:
+Hugging Face Space (`open-predico/dashboard`): Streamlit run in the browser with stlite, so a free static Space (Docker and Gradio Spaces need a paid plan for orgs). Two tabs:
 
 - **Backtest:** leaderboard, paired comparison between configs (share of days won), errors by hour/weekday/month.
 - **Live:** submitted forecasts vs actuals for any day, daily scores over time next to Predico's official score, rank if Predico allows publishing it.

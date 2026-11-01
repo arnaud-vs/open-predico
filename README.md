@@ -22,14 +22,9 @@ ESIOS ─► configs/groups.toml ─► feature frame (15-min UTC) ─► model 
 - **Evaluation:** rolling origin over one test year (Nov 2025 – Oct 2026), forecast made at 14:00 Madrid on D-1, scored exactly like Predico: RMSE on q50, Winkler (α = 0.2) on q10/q90.
 - **Live:** one maintainer account submits a continuous forecast daily; forecasts become public only after the gate closes.
 
-## Results (test year, mean daily score, lower is better)
+## Results
 
-| Model | Energy RMSE | Energy Winkler | Price RMSE | Price Winkler |
-|---|---|---|---|---|
-| Slot climatology (baseline) | 262.6 | 971.3 | 48.5 | 163.1 |
-| Timestral-5M + covariates, 28-day context | **249.5** | **924.4** | **40.7** | **132.3** |
-
-Price is scored on 254 of 365 days: like Predico, a day with any missing truth is skipped. Per-month scores and the exact covariate set will move into `results/` once the benchmark dataset is published.
+Leaderboard, per-month scores, paired comparisons and a day viewer for every backtest config are on the [dashboard](https://huggingface.co/spaces/open-predico/dashboard). Daily scores are in [`results/`](results/).
 
 ## Quickstart
 

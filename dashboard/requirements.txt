@@ -1,0 +1,4 @@
+# Local run only (`streamlit run app.py`); the Space runs app.py in the browser via stlite.
+streamlit==1.50.0
+pandas==2.3.3
+pyarrow==21.0.0
