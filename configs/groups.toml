@@ -13,8 +13,8 @@ mfrr_price = { source = "esios:2197", availability = "past" }  # fill: bid mid-p
 
 [mfrr]
 mfrr_abs_volume = { source = "esios:10055", availability = "past" }
-mfrr_down = { source = "esios:10394", availability = "past" }
-mfrr_up = { source = "esios:10395", availability = "past" }
+mfrr_down = { source = "esios:10394", fill = 0, availability = "past" }  # ESIOS omits zeros; up - down == target
+mfrr_up = { source = "esios:10395", fill = 0, availability = "past" }
 mfrr_inelastic_requested_up = { source = "esios:2184", availability = "past" }
 mfrr_inelastic_requested_down = { source = "esios:2185", availability = "past" }
 mfrr_direct_requested_up = { source = "esios:2188", availability = "past" }
