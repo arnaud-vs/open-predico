@@ -1,0 +1,72 @@
+"""Backtest a TSFM with covariates on the published features (`open-predico/benchmark`, v1).
+
+Every v1 column is used: `availability` in groups.toml splits known-future from past columns,
+the target is the first column and the other target a past covariate. Predictions (with the
+truth as `obs`) go to `<out>/<config>/<target>.parquet`, ready for `evaluation.results`.
+
+    python -m openpredico.evaluation.experiment <config> <repo> <context days> <out dir> [<device>]
+"""
+
+import sys
+import time
+from pathlib import Path
+
+import pandas as pd
+
+from openpredico.config import load_targets
+from openpredico.data.groups import load_groups
+from openpredico.data.hf import download
+from openpredico.evaluation.backtest import backtest
+from openpredico.models.tsfm import timestral
+
+# ponytail: target name -> its column; move to targets.toml when a third target arrives.
+TARGET_COLUMNS = {"spain_mfrr_energy": "mfrr_energy", "spain_mfrr_price": "mfrr_price"}
+CATEGORICAL = ["qh_of_day", "weekday"]
+MAX_NAN = 0.9  # columns missing more than this share of the history are dropped
+
+
+def load_v1(version: str = "v1") -> dict[str, pd.DataFrame]:
+    return {g: download("benchmark", f"{version}/{g}.parquet") for g in load_groups()}
+
+
+def features(frames: dict[str, pd.DataFrame], target: str) -> tuple[pd.DataFrame, list[str]]:
+    """History frame (target first, then past columns, then future ones) and the future columns."""
+    groups = load_groups()
+    df = pd.concat(frames.values(), axis=1)
+    nan = df.isna().mean()
+    drop = [c for c in nan.index[nan > MAX_NAN] if c not in TARGET_COLUMNS.values()]
+    if drop:
+        print(f"dropped (>{MAX_NAN:.0%} missing): {drop}")
+    df = df.drop(columns=drop)
+    # ESIOS omits zero quarter-hours in the sparse mFRR series: missing = no activation.
+    # ponytail: hard-coded until groups.toml carries `fill = 0` for these columns.
+    mfrr = [c for c in groups["mfrr"] if c in df]
+    df[mfrr] = df[mfrr].fillna(0)
+    future = [c for g in groups.values() for c, d in g.items() if d["availability"] == "future"]
+    future = [c for c in future if c in df]
+    y = TARGET_COLUMNS[target]
+    past = [c for c in df if c not in future and c != y]
+    return df[[y, *past, *future]].astype(float), future
+
+
+def run(config: str, repo: str, context_days: int, out: Path, device: str = "cpu") -> None:
+    frames = load_v1()
+    model = timestral.load(repo, device)
+    for target, t in load_targets().items():
+        history, future = features(frames, target)
+        days = pd.date_range(*t["test_period"], tz=t["timezone"])
+        predict = timestral.make_predict(model, context_days, CATEGORICAL)
+        start = time.time()
+        preds = backtest(predict, history, days, t["origin"], future)
+        print(
+            f"{target}: {len(future)} future, {history.shape[1] - 1 - len(future)} past "
+            f"columns, {len(days)} days in {time.time() - start:.0f} s"
+        )
+        preds["obs"] = frames["target"][TARGET_COLUMNS[target]]  # raw truth, NaN kept
+        preds.index.name = "time"
+        (out / config).mkdir(parents=True, exist_ok=True)
+        preds.to_parquet(out / config / f"{target}.parquet")
+
+
+if __name__ == "__main__":
+    run(*sys.argv[1:3], int(sys.argv[3]), Path(sys.argv[4]), *sys.argv[5:])
