@@ -1,28 +1,55 @@
 # open-predico
 
-Open-source forecasting for the [Predico](https://predico-elia.inesctec.pt/docs/) collaborative forecasting platform, and an open benchmark built from it.
+Open-source forecasting for [Predico](https://predico.inesctec.pt/docs/), INESC TEC's collaborative forecasting market, and an open benchmark built from it.
 
-- **First targets:** Spanish mFRR balancing energy and price (day-ahead, 15-min).
-- **Engines:** time-series foundation models, benchmarked against ML models and simple baselines.
-- **Open:** data pipelines, features, models and results are public. Anyone can contribute.
+**Why:** Predico pays forecasters for day-ahead quantile forecasts of grid quantities. This repo is one team's entry, built in the open: data pipelines, features, models, backtests and results are public, and anyone can improve them.
 
-Status: early. See [PLAN.md](PLAN.md) for the design and build order.
+**First target:** Spanish mFRR balancing (EDP program): `spain_mfrr_energy` (net activated energy, MWh, signed) and `spain_mfrr_price` (EUR/MWh), 15-min, day-ahead, gate 17:00 CET on D-1. Truth comes from ESIOS (Red Eléctrica).
+
+Status: early, working end to end. The design and every decision so far live in [PLAN.md](PLAN.md).
+
+## How it works
+
+```
+ESIOS ─► configs/groups.toml ─► feature frame (15-min UTC) ─► model ─► q10/q50/q90
+         (one line per column,                                          │
+          future vs past availability)                 backtest ◄───────┤
+                                                       live submit ◄────┘ (daily, GitHub Actions)
+```
+
+- **Data:** feature groups are declared in `configs/groups.toml`; one runner builds any group. Each column says whether it is known for the target day before the gate (`future`, e.g. day-ahead price) or only up to the forecast time (`past`, e.g. mFRR actuals). The backtest enforces this, so no lookahead.
+- **Models:** simple baselines and time-series foundation models (TSFMs), always with covariates.
+- **Evaluation:** rolling origin over one test year (Nov 2025 – Oct 2026), forecast made at 14:00 Madrid on D-1, scored exactly like Predico: RMSE on q50, Winkler (α = 0.2) on q10/q90.
+- **Live:** one maintainer account submits a continuous forecast daily; forecasts become public only after the gate closes.
+
+## Results (test year, mean daily score, lower is better)
+
+| Model | Energy RMSE | Energy Winkler | Price RMSE | Price Winkler |
+|---|---|---|---|---|
+| Slot climatology (baseline) | 262.8 | 972.5 | 48.5 | 163.3 |
+| Timestral-5M + covariates, 28-day context | _rerun pending_ | | | |
 
 ## Quickstart
 
 ```bash
 git clone https://github.com/arnaud-vs/open-predico && cd open-predico
-uv sync
+uv sync                       # add --extra timestral for the Timestral TSFM
 uv run pytest
 ```
 
+Building data needs a free [ESIOS token](https://api.esios.ree.es/) in `ESIOS_TOKEN`.
+
+## Working with AI agents
+
+Most of this repo was built with Claude Code and agents, and we expect contributors to work the same way. [AGENTS.md](AGENTS.md) is the briefing your agent should read first (Claude Code picks it up through `CLAUDE.md`): repo map, commands, and the rules that matter here (no lookahead, API rate limits, never print secrets or forecast values). Point your agent at PLAN.md for the why.
+
 ## Contributing
 
-Any improvement is welcome — data, features, models, docs, tests, or the repo structure itself. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Any improvement is welcome: data, features, models, docs, tests, or the repo structure itself. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Disclaimer
 
-Independent project. Not affiliated with INESC TEC, Elia, 50Hertz or EDP.
+Independent project. Not affiliated with INESC TEC, Red Eléctrica, EDP, Elia or 50Hertz.
 
 ## License
 

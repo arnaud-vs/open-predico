@@ -23,20 +23,17 @@ uv run ruff check . && uv run ruff format --check .
 
 These are the two most common contributions. Neither is required — any PR is fine.
 
-### Add data (a feature group)
+### Add data (a feature)
 
-One file in `src/openpredico/data/groups/` with:
+- **ESIOS feature:** one line in `configs/groups.toml` (`source = "esios:<id>"`, `availability = "future"` if known for the target day before the gate, otherwise `"past"`). No code.
+- **New source:** one fetch module in `src/openpredico/data/` (e.g. `entsoe.py`), then reference it as `source = "<prefix>:<id>"`.
 
-- `build(start, end)` returning a DataFrame on the 15-min UTC grid.
-- Metadata: source ids, license, and each column's maximum availability (`future` if known for the target day before the gate, otherwise `past`).
-
-Add the source to [DATA_SOURCES.md](DATA_SOURCES.md). New groups land in the next benchmark dataset version. Data files never go in git.
+Add the source to [DATA_SOURCES.md](DATA_SOURCES.md). New columns land in the next benchmark dataset version. Data files never go in git.
 
 ### Add a model
 
-1. An adapter in `src/openpredico/models/` with `fit(history)` and `predict(past, future)` returning q10/q50/q90.
-2. An experiment config in `configs/experiments/` listing the features (each with `availability`), transforms and model settings.
-3. Run a short backtest locally to check it works. Official full-year results are produced by the maintainer.
+1. An adapter in `src/openpredico/models/` (TSFMs in `models/tsfm/`, as an optional extra in `pyproject.toml`): `predict(past, future, days)` returning q10/q50/q90 on the 15-min UTC grid of the target days. TSFMs must use covariates.
+2. Run the backtest locally on part of the test year to check it works. Official full-year results are produced by the maintainer.
 
 ## Rules
 
