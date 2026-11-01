@@ -14,7 +14,42 @@ STEP = pd.Timedelta(minutes=15)
 def load(repo: str = "mistralai/Timestral-5M", device: str = "cpu"):
     from timestral import TimestralForecaster  # optional dependency
 
+    if device == "mps":
+        _float64_on_cpu()
     return TimestralForecaster.from_pretrained(repo, device=device)
+
+
+def _float64_on_cpu() -> None:
+    """Run Timestral's float64 steps (scaler statistics, target encoding) on CPU; MPS has none.
+
+    The transformer stays on the GPU and the statistics are computed exactly as on CPU.
+    ponytail: patches timestral 1.0.0 internals; drop once the library handles MPS.
+    """
+    from timestral import forecaster, scaler
+
+    if getattr(scaler, "_openpredico_patched", False):
+        return
+    cls = forecaster.TimestralForecaster
+    stats, refine, encode = (
+        scaler.compute_causal_statistics,
+        cls._refine_block,
+        cls._encode_categorical,
+    )
+
+    def compute_causal_statistics(data, mask, *args, **kwargs):
+        means, scales = stats(data.cpu(), mask.cpu(), *args, **kwargs)
+        return means.to(data.device), scales.to(data.device)
+
+    def _refine_block(self, quantiles, context, mask, target_rows):
+        cpu = [t.cpu() if t is not None else None for t in (quantiles, context, mask, target_rows)]
+        return refine(self, *cpu).to(quantiles.device)
+
+    def _encode_categorical(self, codes, target_context):  # target encoding is CPU numpy anyway
+        return encode(self, codes, target_context.cpu() if target_context is not None else None)
+
+    scaler.compute_causal_statistics = compute_causal_statistics
+    cls._refine_block, cls._encode_categorical = _refine_block, _encode_categorical
+    scaler._openpredico_patched = True
 
 
 def make_predict(
@@ -47,7 +82,9 @@ def make_predict(
             known_covariates=rows(num),
             categorical_known_covariates=rows(fut[cat]),
         )
-        q = np.stack([np.asarray(fc.quantile(p)).reshape(-1) for p in (0.1, 0.5, 0.9)], axis=1)
+        q = np.stack(
+            [np.asarray(fc.quantile(p).cpu()).reshape(-1) for p in (0.1, 0.5, 0.9)], axis=1
+        )
         out = pd.DataFrame(np.sort(q, axis=1), index=grid, columns=["q10", "q50", "q90"])
         return out[out.index >= days.min().tz_convert("UTC")]  # drop the roll-through to day D
 
