@@ -1,10 +1,16 @@
 """Spain's mFRR balancing energy bids (ENTSO-E 12.3.B/C) from the ENTSO-E File Library.
 
 The REST API keeps ~100 days and returns 100 bids per request, so history comes from the
-File Library (monthly CSV files, Transparency Platform login in ENTSOE_USERNAME / ENTSOE_PWD).
+File Library (Transparency Platform login in ENTSOE_USERNAME / ENTSOE_PWD).
 API: https://documenter.getpostman.com/view/28274243/2sB2qgfz3W
 
-    python -m openpredico.data.entsoe_bids download <raw dir> 2024-12 2026-10
+- Archive (`BalancingEnergyBidsArchives_12.3.B_C_r3/<YYYY_MM>/ES/`): one zip per quarter-hour
+  holding IEC 62325 ReserveBid_MarketDocument XML files named
+  `<Direction>_<Product>_<?>_<Status>_<n>.xml`; fetched in batches of 100 (`archive/*.zip`).
+- Current (`BalancingEnergyBids_12.3.B_C_r3.1/`): one all-Europe CSV per day, kept filtered to
+  Spain's mFRR rows (`daily/*.csv.gz`).
+
+    python -m openpredico.data.entsoe_bids download <raw dir> 2024-12 2026-05 2026_11_01
     python -m openpredico.data.entsoe_bids ladder <raw dir> <out.parquet>
 """
 
@@ -13,8 +19,10 @@ import json
 import os
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
@@ -23,12 +31,15 @@ import pandas as pd
 
 TOKEN_URL = "https://keycloak.tp.entsoe.eu/realms/tp/protocol/openid-connect/token"
 FMS = "https://fms.tp.entsoe.eu"
-FOLDER_HINT = "12.3.B"  # folder name contains the article number
+ARCHIVE = "/TP_export/BalancingEnergyBidsArchives_12.3.B_C_r3/"
+CURRENT = "/TP_export/BalancingEnergyBids_12.3.B_C_r3.1/"
 AREA = "10YES-REE------0"
 DEPTHS = (0, 50, 100, 200, 300, 500, 750, 1000, 1500)  # MW; 0 = first bid in merit order
 MIN_INTERVAL = 2.0  # seconds between requests (ENTSO-E rate limit)
+START = "2024-12-10"  # Spain joins MARI
 
 _last = 0.0
+_token_cache: list[str] = []
 calls = 0
 
 
@@ -52,62 +63,117 @@ def _token() -> str:
     return json.loads(body)["access_token"]
 
 
-def _fms(endpoint: str, body: dict, token: str) -> bytes:
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    return _request(f"{FMS}/{endpoint}", json.dumps(body).encode(), headers)
+def _fms(endpoint: str, body: dict) -> bytes:
+    for attempt in range(2):  # the token expires after minutes: refresh once
+        if attempt or not _token_cache:
+            _token_cache[:] = [_token()]
+        headers = {"Authorization": f"Bearer {_token_cache[0]}", "Content-Type": "application/json"}
+        try:
+            return _request(f"{FMS}/{endpoint}", json.dumps(body).encode(), headers)
+        except urllib.error.HTTPError as e:
+            if attempt or e.code != 401:
+                raise
 
 
-def _list(path: str, token: str) -> list[dict]:
-    body = {"path": path, "pageInfo": {"pageIndex": 0, "pageSize": 5000}}
-    return json.loads(_fms("listFolder", body, token))["contentItemList"]
+def _list(path: str) -> list[dict]:
+    out, page = [], 0
+    while True:
+        body = {"path": path, "pageInfo": {"pageIndex": page, "pageSize": 5000}}
+        items = json.loads(_fms("listFolder", body))["contentItemList"]
+        out, page = out + items, page + 1
+        if len(items) < 5000:
+            return sorted(out, key=lambda i: i["name"])
 
 
-def download(raw: Path, first: str, last: str) -> None:
-    """Download the monthly files from `first` to `last` (YYYY-MM) into `raw`, skipping existing."""
-    # ponytail: a token lasts minutes; fine for ~25 monthly files, refresh it if downloads fail.
-    token = _token()
-    folders = [i["name"] for i in _list("/TP_export/", token) if FOLDER_HINT in i["name"]]
-    if len(folders) != 1:
-        raise SystemExit(f"expected one folder matching {FOLDER_HINT}, got {folders}")
-    folder = f"/TP_export/{folders[0].strip('/')}/"
-    months = {p.strftime("%Y_%m") for p in pd.period_range(first, last, freq="M")}
-    raw.mkdir(parents=True, exist_ok=True)
-    for item in sorted(_list(folder, token), key=lambda i: i["name"]):
-        name = item["name"]
-        if name[:7] not in months or (raw / name).exists():
+def _get(file_ids: list[str], as_zip: bool) -> bytes:
+    body = {"fileIdList": file_ids, "topLevelFolder": "TP_export", "downloadAsZip": as_zip}
+    return _fms("downloadFileContent", body)
+
+
+def download(raw: Path, first: str, last: str, last_day: str) -> None:
+    """Archive months `first`..`last` (YYYY-MM), then daily files up to `last_day` (YYYY_MM_DD).
+
+    Existing files are skipped, so a rerun resumes.
+    """
+    (raw / "archive").mkdir(parents=True, exist_ok=True)
+    (raw / "daily").mkdir(exist_ok=True)
+    for m in pd.period_range(first, last, freq="M").strftime("%Y_%m"):
+        files = [i for i in _list(f"{ARCHIVE}{m}/ES/") if i["name"].startswith("mFRR")]
+        for k in range(0, len(files), 100):  # downloadFileContent takes at most 100 ids
+            dest = raw / "archive" / f"{m}_{k // 100:02d}.zip"
+            if not dest.exists():
+                dest.write_bytes(_get([i["fileId"] for i in files[k : k + 100]], True))
+        print(m, len(files), "files", calls, "requests", flush=True)
+    for item in _list(CURRENT):
+        day = item["name"][:10]
+        dest = raw / "daily" / f"{day}.csv.gz"
+        if day > last_day or dest.exists():
             continue
-        body = {"fileIdList": [item["fileId"]], "topLevelFolder": "TP_export"}
-        content = _fms("downloadFileContent", body, token)
-        if content[:2] == b"PK":  # zipped
-            content = zipfile.ZipFile(io.BytesIO(content)).read(name)
-        (raw / name).write_bytes(content)
-        print(f"{name}: {len(content) / 2**20:.0f} MB", flush=True)
-    print(f"{calls} requests to ENTSO-E")
+        content = _get([item["fileId"]], False)
+        if content[:2] == b"PK":
+            z = zipfile.ZipFile(io.BytesIO(content))
+            content = z.read(z.namelist()[0])
+        df = pd.read_csv(io.BytesIO(content), sep="\t", dtype=str)
+        df[(df.AreaCode == AREA) & (df.ReserveType == "mFRR")].to_csv(dest, index=False)
+        print(day, calls, "requests", flush=True)
+    print("done", calls, "requests")
 
 
-# File Library CSV columns and status filter.
-# ponytail: UNVERIFIED guesses (no file downloaded yet). Check against the first monthly file,
-# incl. product type (standard vs specific) and direct vs scheduled activation, before use.
-COLS = {
-    "time": "DateTime(UTC)",
-    "area": "AreaCode",
-    "direction": "Direction",
-    "price": "Price",
-    "mw": "OfferedQuantity",
-    "status": "Status",
-}
+DIRECTION = {"A01": "up", "A02": "down"}
 
 
-def read_month(path: Path) -> pd.DataFrame:
-    """Spain's available bids in one monthly file: time (UTC), direction (up/down), price, mw."""
-    usecols = list(COLS.values())
-    chunks = pd.read_csv(path, sep="\t", usecols=usecols, chunksize=1_000_000)
-    df = pd.concat(c[c[COLS["area"]] == AREA] for c in chunks)
-    df = df.rename(columns={v: k for k, v in COLS.items()})
-    df = df[df.status.str.lower().eq("available")]
-    df["time"] = pd.to_datetime(df.time, utc=True)
-    df["direction"] = df.direction.str.lower().map({"up": "up", "down": "down"})
-    return df[["time", "direction", "price", "mw"]].dropna()
+def read_xml(xml: bytes) -> pd.DataFrame:
+    """Available bids of one ReserveBid_MarketDocument: time (UTC), direction, price, mw.
+
+    Namespace-agnostic: the archive holds both schema versions 7:1 and 7:2.
+    """
+    rows = []
+    for ts in ET.fromstring(xml).iterfind("{*}Bid_TimeSeries"):
+        if ts.findtext("{*}status/{*}value") != "A06":  # A06 = available
+            continue
+        direction = DIRECTION[ts.findtext("{*}flowDirection.direction")]
+        for period in ts.iterfind("{*}Period"):
+            start = pd.Timestamp(period.findtext("{*}timeInterval/{*}start"))
+            step = pd.Timedelta(period.findtext("{*}resolution"))
+            for p in period.iterfind("{*}Point"):
+                rows.append(
+                    (
+                        start + (int(p.findtext("{*}position")) - 1) * step,
+                        direction,
+                        float(p.findtext("{*}energy_Price.amount")),
+                        float(p.findtext("{*}quantity.quantity")),
+                    )
+                )
+    return pd.DataFrame(rows, columns=["time", "direction", "price", "mw"])
+
+
+def read_archive(path: Path) -> pd.DataFrame:
+    """Available bids in one archive batch (zip of per-quarter-hour zips of XML files)."""
+    parts = []
+    with zipfile.ZipFile(path) as outer:
+        for name in outer.namelist():
+            with zipfile.ZipFile(io.BytesIO(outer.read(name))) as inner:
+                for xml in inner.namelist():
+                    # Skips Unavailable files, and the pre-MARI `Specific_None_None` files
+                    # (no status) that run until Spain's go-live on 2024-12-10.
+                    if "_Available_" in xml:
+                        parts.append(read_xml(inner.read(xml)))
+    return pd.concat(parts, ignore_index=True) if parts else read_xml(b"<x/>")
+
+
+def read_daily(path: Path) -> pd.DataFrame:
+    """Available bids in one daily CSV (already Spain + mFRR): time (UTC), direction, price, mw."""
+    cols = ["ISP(UTC)", "Direction", "Status", "Price[Currency/MWh]", "Volume[MW]"]
+    df = pd.read_csv(path, usecols=cols)
+    df = df[df.Status == "Available"]
+    return pd.DataFrame(
+        {
+            "time": pd.to_datetime(df["ISP(UTC)"], utc=True),
+            "direction": df.Direction.str.lower(),
+            "price": df["Price[Currency/MWh]"],
+            "mw": df["Volume[MW]"],
+        }
+    )
 
 
 def ladder(bids: pd.DataFrame) -> pd.DataFrame:
@@ -130,18 +196,26 @@ def ladder(bids: pd.DataFrame) -> pd.DataFrame:
     return wide
 
 
-def build_ladder(raw: Path, out: Path) -> pd.DataFrame:
-    """Ladder for every monthly file in `raw` on the 15-min UTC grid (index `time`)."""
-    parts = []
-    for path in sorted(raw.glob("*.csv")):
-        bids = read_month(path)
-        # Bids for 15-min products; hourly/other resolutions would be repeated per quarter.
-        parts.append(ladder(bids))
+def build_ladder(raw: Path, out: Path, end: str = "2026-11-02") -> pd.DataFrame:
+    """Ladder from every raw file, one file at a time, on the 15-min UTC grid (index `time`).
+
+    Both sources hold Standard mFRR SA and SA & DA bids (both are offered for scheduled
+    activation, whose price is the target); linked/complex bids are kept as single bids.
+    """
+    parts, n = [], 0
+    files = sorted((raw / "archive").glob("*.zip")) + sorted((raw / "daily").glob("*.csv.gz"))
+    for path in files:
+        bids = read_archive(path) if path.suffix == ".zip" else read_daily(path)
+        n += len(bids)
+        if len(bids):
+            parts.append(ladder(bids))
         print(f"{path.name}: {len(bids)} bids", flush=True)
     df = pd.concat(parts).sort_index()
-    grid = pd.date_range(df.index.min(), df.index.max(), freq="15min", name="time")
-    df = df[~df.index.duplicated()].reindex(grid)
+    df = df[~df.index.duplicated()]  # archive and daily overlap on 2026-04-30
+    grid = pd.date_range(START, end, freq="15min", inclusive="left", tz="UTC", name="time")
+    df = df.reindex(grid)
     df.to_parquet(out)
+    print(f"{n} bids, {df.bid_up_p0.notna().sum()} quarter-hours with up bids")
     return df
 
 
