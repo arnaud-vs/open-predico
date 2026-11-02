@@ -1,7 +1,9 @@
 """Daily scores, matching Predico's evaluation (https://predico.inesctec.pt/docs/evaluation/).
 
 Official: RMSE on q50 (sqrt of the day's mean squared error) and Winkler on q10/q90 (alpha=0.2,
-mean over the day, not normalised). A day with any missing truth is skipped, as Predico does.
+mean over the day, not normalised). Quarter-hours without truth (e.g. no mFRR activation, so no
+price) are left out of the day's means; a day with no truth at all is skipped.
+ponytail: Predico's handling of missing truth is unconfirmed; ask them and match it.
 Diagnostics: MAE, mean pinball over the three quantiles, q10-q90 coverage.
 """
 
@@ -28,8 +30,7 @@ def daily_scores(fc: pd.DataFrame, truth: pd.Series, tz: str = "Europe/Madrid") 
             + (2 / ALPHA) * np.maximum(0, o - q90),
             "ae": (o - q50).abs(),
             "pinball": sum(_pinball(o, df[c], q) for c, q in QUANTILES.items()) / len(QUANTILES),
-            "covered": ((o >= q10) & (o <= q90)).astype(float),
-            "missing": o.isna(),
+            "covered": ((o >= q10) & (o <= q90)).astype(float).where(o.notna()),
         },
         index=df.index,
     )
@@ -43,7 +44,7 @@ def daily_scores(fc: pd.DataFrame, truth: pd.Series, tz: str = "Europe/Madrid") 
             "coverage": g.covered.mean(),
         }
     )
-    return out[~g.missing.any()]  # incomplete truth: day skipped for everyone
+    return out[g.se.count() > 0]  # NaN steps drop out of the means
 
 
 def _pinball(obs: pd.Series, pred: pd.Series, q: float) -> pd.Series:

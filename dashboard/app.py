@@ -91,8 +91,7 @@ def load_steps() -> pd.DataFrame:
             + (2 / ALPHA) * np.maximum(0, o - q90)
         )
         df["ae"] = (o - q50).abs()
-        df["covered"] = ((o >= q10) & (o <= q90)).astype(float)
-        df["missing"] = o.isna()
+        df["covered"] = ((o >= q10) & (o <= q90)).astype(float).where(o.notna())
         local = df.index.tz_convert(TZ)
         df["day"] = local.tz_localize(None).normalize()
         df["hour"] = local.hour
@@ -104,16 +103,16 @@ def load_steps() -> pd.DataFrame:
 
 @st.cache_resource(ttl=3600)
 def load_days() -> pd.DataFrame:
-    """Daily scores; a day with any missing truth is skipped, as Predico does."""
+    """Daily scores over the quarter-hours that have truth; days with none are dropped."""
     g = load_steps().groupby(["target", "config", "day"])
     d = g.agg(
         se=("se", "mean"),
         winkler=("winkler", "mean"),
         coverage=("covered", "mean"),
-        missing=("missing", "any"),
+        n=("se", "count"),
     )
     d["rmse"] = np.sqrt(d.pop("se"))
-    return d[~d.pop("missing")].reset_index()
+    return d[d.pop("n") > 0].reset_index()
 
 
 def leaderboard(days: pd.DataFrame) -> pd.DataFrame:
@@ -218,7 +217,8 @@ with tab_bt:
     targets = sorted(days.target.unique())
     st.markdown(
         "Test year 1 Nov 2025 – 31 Oct 2026, forecast made at 14:00 Madrid on D-1, scored per "
-        "local day; lower is better. Days with any missing truth are skipped, like Predico."
+        "local day; lower is better. Quarter-hours without truth (no mFRR activation, so no price) "
+        "are left out."
     )
 
     st.subheader("Leaderboard")
