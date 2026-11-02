@@ -1,4 +1,4 @@
-"""open-predico dashboard: backtest scores and target data from open-predico/benchmark (public).
+"""open-predico dashboard: backtests, target data and input catalog from open-predico/benchmark.
 
 Runs in the browser with stlite (Streamlit on Pyodide, see index.html), so the Space is a free
 static one; `streamlit run app.py` works locally too. Pyodide is slow: every file is fetched once
@@ -202,6 +202,12 @@ def band_chart(df: pd.DataFrame, x: alt.X, title: str) -> alt.LayerChart:
     return band + line
 
 
+@st.cache_resource(ttl=3600)
+def load_catalog() -> pd.DataFrame:
+    """catalog/inputs.parquet, built by src/openpredico/data/catalog.py."""
+    return parquet("catalog/inputs.parquet")
+
+
 # --- Page ------------------------------------------------------------------------------------
 
 st.title("open-predico")
@@ -210,7 +216,7 @@ st.caption(
     "[Code](https://github.com/arnaud-vs/open-predico) · "
     "[Data](https://huggingface.co/datasets/open-predico/benchmark)"
 )
-tab_bt, tab_target = st.tabs(["Backtest", "Target data"])
+tab_bt, tab_target, tab_inputs = st.tabs(["Backtest", "Target data", "Input features"])
 
 with tab_bt:
     steps, days = load_steps(), load_days()
@@ -496,3 +502,44 @@ with tab_target:
         )
     )
     st.caption("Random sample of 5000 quarter-hours.")
+
+with tab_inputs:
+    cat = load_catalog()
+    st.markdown(
+        "Every ESIOS indicator (from the `/indicators` and `/offer_indicators` lists), plus "
+        "computed calendar columns and other sources we plan to use. **Used** marks series in "
+        "a feature group of `configs/groups.toml`; **availability** `future` = known for the "
+        "target day before the gate, `past` = only known up to the forecast origin. ESIOS names "
+        "and descriptions are in Spanish."
+    )
+    c = st.columns(3)
+    c[0].metric("Series", len(cat))
+    c[1].metric("Used", int(cat.used.sum()))
+    c[2].metric("Feature groups", cat.group.str.split(", ").explode().nunique())
+    c1, c2 = st.columns([1, 3])
+    used_only = c1.toggle("Used only")
+    query = c2.text_input("Search name or description", placeholder="e.g. mFRR, eólica, 600")
+    shown = cat[cat.used] if used_only else cat
+    if query:
+        q = query.strip()
+        hit = (
+            shown.name.str.contains(q, case=False, regex=False)
+            | shown.description.str.contains(q, case=False, regex=False)
+            | shown.id.eq(q)
+        )
+        shown = shown[hit]
+    st.caption(f"{len(shown)} of {len(cat)} series.")
+    st.dataframe(
+        shown[["source", "id", "name", "description", "used", "group", "availability", "column"]],
+        column_config={
+            "source": "Source",
+            "id": "ID",
+            "name": st.column_config.TextColumn("Name", width="medium"),
+            "description": st.column_config.TextColumn("Description", width="large"),
+            "used": "Used",
+            "group": "Group",
+            "availability": "Availability",
+            "column": "Columns",
+        },
+        hide_index=True,
+    )
