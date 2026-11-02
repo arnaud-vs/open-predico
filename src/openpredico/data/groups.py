@@ -12,12 +12,15 @@ import pandas as pd
 from dateutil.easter import easter
 
 from openpredico.config import CONFIGS
-from openpredico.data import esios, hf
+from openpredico.data import entsoe_bids, esios, hf
 
 TZ = "Europe/Madrid"
 COLUMN_KEYS = {"source", "geo", "fill", "availability"}
 AVAILABILITY = {"future", "past"}
-PREFIXES = {"esios", "calendar"}
+PREFIXES = {"esios", "calendar", "entsoe_bids"}
+# ponytail: bid ladder built locally by `entsoe_bids ladder` (File Library login needed), not
+# fetched here. Put it at this path before building the `mfrr_bids` group.
+BIDS_LADDER = CONFIGS.parent / "data" / "bids_ladder.parquet"
 
 
 def load_groups(path: Path = CONFIGS / "groups.toml") -> dict[str, dict]:
@@ -54,6 +57,9 @@ def build(group: str, start: str, end: str) -> pd.DataFrame:
         prefix, key = c["source"].split(":")
         if prefix == "calendar":
             df[name] = CALENDAR[key](grid)
+            continue
+        if prefix == "entsoe_bids":
+            df[name] = entsoe_bids.to_series(key, BIDS_LADDER).reindex(grid)
             continue
         if key not in raw:
             raw[key] = esios.fetch_values(int(key), start, end)
