@@ -506,40 +506,58 @@ with tab_target:
 with tab_inputs:
     cat = load_catalog()
     st.markdown(
-        "Every ESIOS indicator (from the `/indicators` and `/offer_indicators` lists), plus "
-        "computed calendar columns and other sources we plan to use. **Used** marks series in "
-        "a feature group of `configs/groups.toml`; **availability** `future` = known for the "
-        "target day before the gate, `past` = only known up to the forecast origin. ESIOS names "
-        "and descriptions are in Spanish."
+        "Every series we could feed a model. ESIOS serves three kinds of data, each as a list "
+        "endpoint plus one data endpoint per id: **indicators** (time series, "
+        "`/indicators/{id}`), **offer indicators** (bid curves, `/offer_indicators/{id}`) and "
+        "**archives** (bulk files such as I90 or liquicomun, `/archives/{id}/download`). Calendar "
+        "columns are computed; ENTSO-E rows are planned. **Used** marks series in a feature "
+        "group of `configs/groups.toml`; **availability** `future` = known for the target day "
+        "before the gate, `past` = only known up to the forecast origin. Categories come from "
+        "keyword rules on the English name, so a few rows may sit in the wrong bucket."
     )
     c = st.columns(3)
     c[0].metric("Series", len(cat))
     c[1].metric("Used", int(cat.used.sum()))
     c[2].metric("Feature groups", cat.group.str.split(", ").explode().nunique())
-    c1, c2 = st.columns([1, 3])
-    used_only = c1.toggle("Used only")
-    query = c2.text_input("Search name or description", placeholder="e.g. mFRR, eólica, 600")
-    shown = cat[cat.used] if used_only else cat
+    summary = (
+        cat.groupby("category")
+        .agg(series=("id", "size"), used=("used", "sum"))
+        .sort_values(["used", "series"], ascending=False)
+    )
+    st.dataframe(summary, column_config={"category": "Category"})
+    c1, c2, c3 = st.columns([2, 1, 3])
+    category = c1.selectbox("Category", ["All", *summary.index])
+    used_only = c2.toggle("Used only")
+    query = c3.text_input("Search name or description", placeholder="e.g. mFRR, wind, 600")
+    shown = cat if category == "All" else cat[cat.category == category]
+    if used_only:
+        shown = shown[shown.used]
     if query:
         q = query.strip()
         hit = (
             shown.name.str.contains(q, case=False, regex=False)
+            | shown.name_es.fillna("").str.contains(q, case=False, regex=False)
             | shown.description.str.contains(q, case=False, regex=False)
             | shown.id.eq(q)
         )
         shown = shown[hit]
     st.caption(f"{len(shown)} of {len(cat)} series.")
+    cols = ["used", "category", "subcategory", "area", "source", "id", "name", "description"]
     st.dataframe(
-        shown[["source", "id", "name", "description", "used", "group", "availability", "column"]],
+        shown[[*cols, "group", "availability", "column", "name_es"]],
         column_config={
+            "used": "Used",
+            "category": "Category",
+            "subcategory": "Subcategory",
+            "area": "Area",
             "source": "Source",
             "id": "ID",
             "name": st.column_config.TextColumn("Name", width="medium"),
             "description": st.column_config.TextColumn("Description", width="large"),
-            "used": "Used",
             "group": "Group",
             "availability": "Availability",
             "column": "Columns",
+            "name_es": "Name (ES)",
         },
         hide_index=True,
     )
