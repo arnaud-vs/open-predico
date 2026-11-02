@@ -7,6 +7,7 @@ truth as `obs`) go to `<out>/<config>/<target>.parquet`, ready for `evaluation.r
     python -m openpredico.evaluation.experiment <config> <repo> <context days> <out dir> [<device>]
 """
 
+import importlib
 import sys
 import time
 from pathlib import Path
@@ -17,11 +18,17 @@ from openpredico.config import load_targets
 from openpredico.data.groups import load_groups
 from openpredico.data.hf import download
 from openpredico.evaluation.backtest import backtest
-from openpredico.models.tsfm import timestral
 
 # ponytail: target name -> its column; move to targets.toml when a third target arrives.
 TARGET_COLUMNS = {"spain_mfrr_energy": "mfrr_energy", "spain_mfrr_price": "mfrr_price"}
 CATEGORICAL = ["qh_of_day", "weekday"]
+# Hugging Face org of the weights -> adapter module in models/tsfm/.
+ADAPTERS = {
+    "mistralai": "timestral",
+    "amazon": "chronos2",
+    "google": "timesfm",
+    "theforecastingcompany": "t0",
+}
 MAX_NAN = 0.9  # columns missing more than this share of the history are dropped
 
 
@@ -51,11 +58,12 @@ def features(frames: dict[str, pd.DataFrame], target: str) -> tuple[pd.DataFrame
 
 def run(config: str, repo: str, context_days: int, out: Path, device: str = "cpu") -> None:
     frames = load_v1()
-    model = timestral.load(repo, device)
+    adapter = importlib.import_module(f"openpredico.models.tsfm.{ADAPTERS[repo.split('/')[0]]}")
+    model = adapter.load(repo, device)
     for target, t in load_targets().items():
         history, future = features(frames, target)
         days = pd.date_range(*t["test_period"], tz=t["timezone"])
-        predict = timestral.make_predict(model, context_days, CATEGORICAL)
+        predict = adapter.make_predict(model, context_days, CATEGORICAL)
         start = time.time()
         preds = backtest(predict, history, days, t["origin"], future)
         print(
