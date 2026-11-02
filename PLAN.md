@@ -86,7 +86,7 @@ Rules enforced by the harness:
 - TSFMs forecast from the end of their context, so they roll through the gap between origin and target day; those steps are discarded. ML models predict the target day directly.
 - `context_days` is a config choice, capped by each model's maximum context.
 - Each TSFM is an optional install (`pip install openpredico[chronos2]`) because their dependencies conflict. Every TSFM runs with covariates (past + known-future); models without covariate support are not in v1. No univariate TSFM runs; baselines are the reference.
-- **v1 TSFMs:** Chronos-2, TimesFM 3, Timestral (5M and 209M), T0-gamma (weights and covariate support to confirm), Toto (CPU and covariate support to confirm).
+- **v1 TSFMs:** Chronos-2, TimesFM 3, Timestral-5M and T0-gamma run (ctx90, with covariates; scores on the dashboard). TimesFM 3 weights are non-commercial: benchmark only, never live. Toto skipped (no zero-shot covariates). Timestral-209M parked: over 5 h per target on a laptop CPU; run it on a cloud GPU.
 - **Baselines:** persistence, slot climatology (quantiles per local 15-min slot, last 28 days, weekdays pooled: per-weekday scored worse on 2026 data), zero-inflated climatology.
 
 ## Benchmark
