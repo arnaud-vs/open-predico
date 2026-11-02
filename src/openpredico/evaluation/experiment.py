@@ -3,8 +3,11 @@
 Every v1 column is used: `availability` in groups.toml splits known-future from past columns,
 the target is the first column and the other target a past covariate. Predictions (with the
 truth as `obs`) go to `<out>/<config>/<target>.parquet`, ready for `evaluation.results`.
+`drop` leaves out comma-separated columns (ablation); `drop=all` keeps only the target history
+(univariate: no past, known-future or calendar covariates).
 
-    python -m openpredico.evaluation.experiment <config> <repo> <context days> <out dir> [<device>]
+    python -m openpredico.evaluation.experiment <config> <repo> <context days> <out dir> \
+        [<device>] [<drop>]
 """
 
 import importlib
@@ -36,10 +39,18 @@ def load_v1(version: str = "v1") -> dict[str, pd.DataFrame]:
     return {g: download("benchmark", f"{version}/{g}.parquet") for g in load_groups()}
 
 
-def features(frames: dict[str, pd.DataFrame], target: str) -> tuple[pd.DataFrame, list[str]]:
-    """History frame (target first, then past columns, then future ones) and the future columns."""
+def features(
+    frames: dict[str, pd.DataFrame], target: str, drop: str = ""
+) -> tuple[pd.DataFrame, list[str]]:
+    """History frame (target first, then past columns, then future ones) and the future columns.
+
+    `drop`: comma-separated columns to leave out, or "all" for the target alone.
+    """
     groups = load_groups()
-    df = pd.concat(frames.values(), axis=1)
+    y = TARGET_COLUMNS[target]
+    if drop == "all":
+        return frames["target"][[y]].astype(float), []
+    df = pd.concat(frames.values(), axis=1).drop(columns=[c for c in drop.split(",") if c])
     nan = df.isna().mean()
     drop = [c for c in nan.index[nan > MAX_NAN] if c not in TARGET_COLUMNS.values()]
     if drop:
@@ -51,17 +62,18 @@ def features(frames: dict[str, pd.DataFrame], target: str) -> tuple[pd.DataFrame
     df[mfrr] = df[mfrr].fillna(0)
     future = [c for g in groups.values() for c, d in g.items() if d["availability"] == "future"]
     future = [c for c in future if c in df]
-    y = TARGET_COLUMNS[target]
     past = [c for c in df if c not in future and c != y]
     return df[[y, *past, *future]].astype(float), future
 
 
-def run(config: str, repo: str, context_days: int, out: Path, device: str = "cpu") -> None:
+def run(
+    config: str, repo: str, context_days: int, out: Path, device: str = "cpu", drop: str = ""
+) -> None:
     frames = load_v1()
     adapter = importlib.import_module(f"openpredico.models.tsfm.{ADAPTERS[repo.split('/')[0]]}")
     model = adapter.load(repo, device)
     for target, t in load_targets().items():
-        history, future = features(frames, target)
+        history, future = features(frames, target, drop)
         days = pd.date_range(*t["test_period"], tz=t["timezone"])
         predict = adapter.make_predict(model, context_days, CATEGORICAL)
         start = time.time()
