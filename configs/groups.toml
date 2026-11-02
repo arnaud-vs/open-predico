@@ -1,7 +1,7 @@
 # Feature groups. See PLAN.md > Data and features.
 #
 # One table per group, one line per column:
-#   source       "esios:<id>" or "calendar:<name>" (computed)
+#   source       "esios:<id>", "calendar:<name>" (computed) or "entsoe_bids:<column>" (bid ladder)
 #   geo          ESIOS geo_id, for indicators published for several geos
 #   fill         value for missing quarter-hours (none = keep NaN)
 #   availability "future" = known for the target day before the gate
@@ -21,6 +21,29 @@ mfrr_direct_requested_up = { source = "esios:2188", availability = "past" }
 mfrr_direct_requested_down = { source = "esios:2189", availability = "past" }
 mfrr_inelastic_covered_up = { source = "esios:2192", availability = "past" }
 mfrr_inelastic_covered_down = { source = "esios:2193", availability = "past" }
+
+[mfrr_bids]  # ENTSO-E 12.3.B/C, Spain's available mFRR bids; published after delivery
+bid_up_mw = { source = "entsoe_bids:bid_up_mw", availability = "past" }
+bid_up_p0 = { source = "entsoe_bids:bid_up_p0", availability = "past" }
+bid_up_p50 = { source = "entsoe_bids:bid_up_p50", availability = "past" }
+bid_up_p100 = { source = "entsoe_bids:bid_up_p100", availability = "past" }
+bid_up_p200 = { source = "entsoe_bids:bid_up_p200", availability = "past" }
+bid_up_p300 = { source = "entsoe_bids:bid_up_p300", availability = "past" }
+bid_up_p500 = { source = "entsoe_bids:bid_up_p500", availability = "past" }
+bid_up_p750 = { source = "entsoe_bids:bid_up_p750", availability = "past" }
+bid_up_p1000 = { source = "entsoe_bids:bid_up_p1000", availability = "past" }
+bid_up_p1500 = { source = "entsoe_bids:bid_up_p1500", availability = "past" }
+bid_down_mw = { source = "entsoe_bids:bid_down_mw", availability = "past" }
+bid_down_p0 = { source = "entsoe_bids:bid_down_p0", availability = "past" }
+bid_down_p50 = { source = "entsoe_bids:bid_down_p50", availability = "past" }
+bid_down_p100 = { source = "entsoe_bids:bid_down_p100", availability = "past" }
+bid_down_p200 = { source = "entsoe_bids:bid_down_p200", availability = "past" }
+bid_down_p300 = { source = "entsoe_bids:bid_down_p300", availability = "past" }
+bid_down_p500 = { source = "entsoe_bids:bid_down_p500", availability = "past" }
+bid_down_p750 = { source = "entsoe_bids:bid_down_p750", availability = "past" }
+bid_down_p1000 = { source = "entsoe_bids:bid_down_p1000", availability = "past" }
+bid_down_p1500 = { source = "entsoe_bids:bid_down_p1500", availability = "past" }
+bid_mid_p100 = { source = "entsoe_bids:bid_mid_p100", availability = "past" }
 
 [da_market]
 da_price_es = { source = "esios:600", geo = 3, availability = "future" }  # Spain

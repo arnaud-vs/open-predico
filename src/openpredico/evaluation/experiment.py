@@ -35,8 +35,13 @@ ADAPTERS = {
 MAX_NAN = 0.9  # columns missing more than this share of the history are dropped
 
 
+# ponytail: groups added after v1 (not on HF yet); drop once v2 is published and chosen.
+NOT_IN_V1 = {"mfrr_bids"}
+
+
 def load_v1(version: str = "v1") -> dict[str, pd.DataFrame]:
-    return {g: download("benchmark", f"{version}/{g}.parquet") for g in load_groups()}
+    groups = [g for g in load_groups() if g not in NOT_IN_V1]
+    return {g: download("benchmark", f"{version}/{g}.parquet") for g in groups}
 
 
 def features(
