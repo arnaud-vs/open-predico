@@ -7,7 +7,7 @@ truth as `obs`) go to `<out>/<config>/<target>.parquet`, ready for `evaluation.r
 (univariate: no past, known-future or calendar covariates).
 
     python -m openpredico.evaluation.experiment <config> <repo> <context days> <out dir> \
-        [<device>] [<drop>]
+        [<device>] [<drop>] [<origin HH:MM, local; default from targets.toml>]
 """
 
 import importlib
@@ -67,7 +67,13 @@ def features(
 
 
 def run(
-    config: str, repo: str, context_days: int, out: Path, device: str = "cpu", drop: str = ""
+    config: str,
+    repo: str,
+    context_days: int,
+    out: Path,
+    device: str = "cpu",
+    drop: str = "",
+    origin: str = "",
 ) -> None:
     frames = load_v1()
     adapter = importlib.import_module(f"openpredico.models.tsfm.{ADAPTERS[repo.split('/')[0]]}")
@@ -77,7 +83,7 @@ def run(
         days = pd.date_range(*t["test_period"], tz=t["timezone"])
         predict = adapter.make_predict(model, context_days, CATEGORICAL)
         start = time.time()
-        preds = backtest(predict, history, days, t["origin"], future)
+        preds = backtest(predict, history, days, origin or t["origin"], future)
         print(
             f"{target}: {len(future)} future, {history.shape[1] - 1 - len(future)} past "
             f"columns, {len(days)} days in {time.time() - start:.0f} s"
