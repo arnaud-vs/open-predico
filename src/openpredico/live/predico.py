@@ -15,7 +15,7 @@ QUANTILES = ("q10", "q50", "q90")
 
 class Predico:
     def __init__(self) -> None:
-        self.api = os.environ.get("PREDICO_URL", "https://predico.inesctec.pt") + "/api/v1"
+        self.api = (os.environ.get("PREDICO_URL") or "https://predico.inesctec.pt") + "/api/v1"
         resp = requests.post(
             f"{self.api}/token",
             data={"email": os.environ["PREDICO_EMAIL"], "password": os.environ["PREDICO_PASSWORD"]},

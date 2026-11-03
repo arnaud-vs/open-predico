@@ -1,6 +1,6 @@
 name: submit
 
-# Daily continuous forecast to Predico. Runs at 13:00 UTC (after OMIE day-ahead results)
+# Daily continuous forecast to Predico (t0-gamma D+1, climatology D+2..D+10). Runs at 13:00 UTC (after OMIE day-ahead results)
 # and retries at 14:00 UTC; the latest submission counts. Gate: 17:00 CET/CEST D-1.
 on:
   schedule:
@@ -24,11 +24,17 @@ jobs:
   submit:
     runs-on: ubuntu-latest
     environment: production
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uv sync --no-dev
+        with:
+          enable-cache: true
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface/hub
+          key: hf-t0-gamma
+      - run: uv sync --no-dev --extra t0
       - run: uv run python -m openpredico.live.submit ${{ inputs.dry_run && '--dry-run' || '' }}
         env:
           ESIOS_TOKEN: ${{ secrets.ESIOS_TOKEN }}
