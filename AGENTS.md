@@ -11,6 +11,8 @@ Read [PLAN.md](PLAN.md) before changing anything: it records every design decisi
 - `src/openpredico/evaluation/`: `backtest.py` (rolling origin), `metrics.py` (Predico's scores).
 - `src/openpredico/live/`: daily submission. The only code that touches Predico or secrets.
 
+Adding a target (e.g. 50Hertz wind)? Read PLAN.md > Adding a target first: it lists the Spain-specific code to lift.
+
 ## Commands
 
 ```bash

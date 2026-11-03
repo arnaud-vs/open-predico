@@ -2,13 +2,13 @@ name: submit
 
 # Daily continuous forecast to Predico (t0-gamma D+1, climatology D+2..D+10).
 # Runs at 13:00 UTC (after OMIE day-ahead results) and retries at 14:00 UTC; the latest
-# submission counts. Gate: 17:00 CET D-1, session open the hour before. At 14:15 and 15:15 UTC
-# (inside that hour in summer and winter) --check resubmits if an open challenge isn't covered.
+# submission counts. Gate: 17:00 CET D-1 (16:00 UTC), session open the hour before. At 15:15,
+# 15:30 and 15:45 UTC --check resubmits if an open challenge isn't covered.
 on:
   schedule:
     - cron: "0 13 * * *"
     - cron: "0 14 * * *"
-    - cron: "15 14,15 * * *"
+    - cron: "15,30,45 15 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -38,7 +38,7 @@ jobs:
           path: ~/.cache/huggingface/hub
           key: hf-t0-gamma
       - run: uv sync --no-dev --extra t0
-      - run: uv run python -m openpredico.live.submit ${{ inputs.dry_run && '--dry-run' || '' }} ${{ github.event.schedule == '15 14,15 * * *' && '--check' || '' }}
+      - run: uv run python -m openpredico.live.submit ${{ inputs.dry_run && '--dry-run' || '' }} ${{ github.event.schedule == '15,30,45 15 * * *' && '--check' || '' }}
         env:
           ESIOS_TOKEN: ${{ secrets.ESIOS_TOKEN }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}

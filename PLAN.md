@@ -113,13 +113,25 @@ Rules enforced by the harness:
 ## Live operations
 
 - **Continuous submission only:** one forecast per day covering D+1 to D+10. Predico slices it at each gate closure. If a run fails, yesterday's forecast still covers tomorrow. D+1 comes from the live config (`t0gamma_cov_ctx90`: best Apache-2.0 model in the backtest, 2026-11-03), D+2 to D+10 from the slot-climatology baseline. EDP program pays D+1 only (Predico programs page, Nov 2026), so D+2 to D+10 exist only as a fallback.
-- **Schedule (GitHub Actions, UTC):** `submit` at 13:00 (14:00 CET / 15:00 CEST, after OMIE results) with a retry at 14:00 (≥1 h before the gate in both CET and CEST); `publish` at 16:30.
+- **Schedule (GitHub Actions, UTC):** `submit` at 13:00 (14:00 CET / 15:00 CEST, after OMIE results) with a retry at 14:00 (≥1 h before the gate in both CET and CEST); `--check` at 15:15, 15:30 and 15:45 (inside the session, which opens the hour before the gate: Predico gates are hourly, `gate_closure` in the API is authoritative) resubmits if an open challenge isn't `ready` in `market/session/coverage`; `publish` at 16:30.
 - **Late features:** filled with NaN and recorded; the retry submits the full forecast if the data has arrived. The latest submission counts.
 - **`submit`:** build features → predict → validate (full grid, no NaN, sorted, ≤ 240 h) → submit → check coverage → save forecast and exact inputs to HF `live-private`. Never prints forecast values (Actions logs are public).
 - **`publish`:** after gate closure, copy closed days to public HF `live`; fetch actuals and Predico's official scores for us; recompute scores until the month freezes (day 7 of the next month); fail if today's submission is missing.
 - **Monitoring:** GitHub failure emails plus the `publish` check (which catches skipped scheduled runs).
 - **Secrets:** GitHub `production` environment, `main` only: `HF_TOKEN` (fine-grained, org-scoped), `ESIOS_TOKEN`, `ENTSOE_API_KEY`, `PREDICO_EMAIL`, `PREDICO_PASSWORD`.
 - **Before go-live:** dry run on the Predico playground; historical forecast export from the backtest if required.
+- **Playground:** set `PREDICO_URL=https://playground.predico.inesctec.pt` (scheme included). Playground runs skip the HF upload. Both Spain resources and `germany_wind_50hertz_ca` exist there (checked 2026-11-03). Auth: access token ~1 h, refresh 24 h, no long-lived API key, so the password stays a secret.
+
+## Adding a target (next: 50Hertz wind)
+
+"More targets are configuration" is the goal, not the state yet. Spain is hard-coded in these places; a second target with other features has to lift them:
+
+- **Truth and features:** `germany_wind_50hertz_ca` needs ENTSO-E (or Predico's raw-data endpoint, `docs/downloading_raw_data/`) instead of ESIOS. Add one fetch module and its prefix in `data/groups.py` (`PREFIXES`); ENTSO-E at most one request every 2 s. Candidate features: TSO day-ahead wind forecast (ENTSO-E A69), actual wind (A75 B18/B19), calendar.
+- **Which groups belong to which target:** `groups.toml` is one global set and `experiment.features()` concatenates every group. Add a `groups = [...]` key per target in `targets.toml`, and move `TARGET_COLUMNS` (`evaluation/experiment.py`) there too.
+- **Time zone:** `data/groups.py` (`TZ`, calendar, `holiday_es`) and `live/submit.py` (`TZ`) assume Europe/Madrid. Use the target's `timezone`; German holidays need their own calendar column.
+- **`kind = "generation"`:** `config.py` requires a `capacity`, but nothing clips to [0, capacity] yet. Add it after predict, in both the backtest and live.
+- **Benchmark:** build the target's groups into the next HF dataset version, backtest the baseline plus the TSFMs, and pick a live config with a commercial-use licence (TimesFM 3 is out).
+- **Live:** gate 15:00 CET (14:00 UTC), session 13:00 to 14:00 UTC, so it needs its own run (before 13:00 UTC) and its own `--check` times. Add a `--target` filter to `live/submit.py` and a second schedule in `submit.yml`, or a second workflow.
 
 ## Predico rules that shape the repo
 
