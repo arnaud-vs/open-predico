@@ -60,3 +60,6 @@ class Predico:
     def coverage(self) -> dict:
         """Per-challenge readiness before the gate (`ready`, `source`)."""
         return self._get("market/session/coverage")
+
+    def open_challenges(self, resource_name: str) -> list[dict]:
+        return self._get("market/challenge", open_only="true", resource_name=resource_name)["data"]

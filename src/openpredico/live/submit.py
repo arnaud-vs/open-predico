@@ -88,5 +88,31 @@ def main(dry_run: bool) -> None:
         print("coverage:", client.coverage())
 
 
+def not_ready(client: Predico) -> list[str]:
+    """Our targets with an open challenge that our forecasts don't fully cover yet."""
+    ready = {c["challenge_id"]: c["ready"] for c in client.coverage()["data"]["coverage"]}
+    names = [t["predico_resource"] for t in load_targets().values()]
+    return [
+        c["resource_name"]
+        for n in names
+        for c in client.open_challenges(n)
+        if not ready.get(c["id"])
+    ]
+
+
+def check_and_retry() -> None:
+    """Run in each open session before the gate: resubmit if an open challenge isn't covered."""
+    missing = not_ready(Predico())
+    print(f"not ready: {missing}")
+    if not missing:
+        return  # covered, or no session of ours open right now
+    main(dry_run=False)
+    if missing := not_ready(Predico()):
+        sys.exit(f"still not ready after resubmit: {missing}")
+
+
 if __name__ == "__main__":
-    main(dry_run="--dry-run" in sys.argv)
+    if "--check" in sys.argv:
+        check_and_retry()
+    else:
+        main(dry_run="--dry-run" in sys.argv)
