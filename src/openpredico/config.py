@@ -9,7 +9,16 @@ from zoneinfo import ZoneInfo
 # we ever publish wheels.
 CONFIGS = Path(__file__).resolve().parents[2] / "configs"
 
-TARGET_KEYS = {"predico_resource", "truth", "unit", "kind", "timezone", "origin", "test_period"}
+TARGET_KEYS = {
+    "predico_resource",
+    "truth",
+    "unit",
+    "kind",
+    "timezone",
+    "origin",
+    "gate",
+    "test_period",
+}
 KINDS = {"market", "generation"}
 
 
@@ -31,6 +40,7 @@ def _validate_target(name: str, t: dict) -> None:
         raise ValueError(f"target {name!r}: generation targets need a capacity")
     ZoneInfo(t["timezone"])  # raises on unknown timezone
     time.fromisoformat(t["origin"])
+    time.fromisoformat(t["gate"])
     start, end = (date.fromisoformat(d) for d in t["test_period"])
     if start >= end:
         raise ValueError(f"target {name!r}: test_period start must be before end")

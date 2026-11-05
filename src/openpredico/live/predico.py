@@ -1,8 +1,7 @@
 """Minimal Predico API client. Docs: https://predico.inesctec.pt/docs/
 
-Credentials from PREDICO_EMAIL / PREDICO_PASSWORD. Set PREDICO_URL to
-https://playground.predico.inesctec.pt for dry runs.
-Never log forecast values: GitHub Actions logs are public.
+Credentials from PREDICO_EMAIL / PREDICO_PASSWORD; base URL from the env var named in URL_VAR.
+Never log forecast values: live forecasts stay private until the gate closes.
 """
 
 import os
@@ -11,11 +10,14 @@ import pandas as pd
 import requests
 
 QUANTILES = ("q10", "q50", "q90")
+# ponytail: playground until production unlocks (5 good days); then switch to "PREDICO_URL".
+URL_VAR = "PREDICO_PLAYGROUND_URL"
 
 
 class Predico:
     def __init__(self) -> None:
-        self.api = (os.environ.get("PREDICO_URL") or "https://predico.inesctec.pt") + "/api/v1"
+        url = os.environ[URL_VAR]  # no silent fallback to production
+        self.api = ("" if "://" in url else "https://") + url.rstrip("/") + "/api/v1"
         resp = requests.post(
             f"{self.api}/token",
             data={"email": os.environ["PREDICO_EMAIL"], "password": os.environ["PREDICO_PASSWORD"]},
@@ -60,6 +62,15 @@ class Predico:
     def coverage(self) -> dict:
         """Per-challenge readiness before the gate (`ready`, `source`)."""
         return self._get("market/session/coverage")
+
+    def submitted_days(self, resource_name: str) -> set[str]:
+        """Target days (YYYY-MM-DD) for which Predico registered a session submission of ours."""
+        subs = {
+            s["market_session_challenge"] for s in self._get("market/challenge/submission")["data"]
+        }
+        # ponytail: lists every challenge of the resource ever; filter by date if it gets slow
+        challenges = self._get("market/challenge", resource_name=resource_name)["data"]
+        return {str(c["target_day"])[:10] for c in challenges if c["id"] in subs}
 
     def open_challenges(self, resource_name: str) -> list[dict]:
         return self._get("market/challenge", open_only="true", resource_name=resource_name)["data"]

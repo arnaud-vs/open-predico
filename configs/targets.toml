@@ -2,7 +2,8 @@
 #
 # kind:   "market"     -> no clipping, values may be negative
 #         "generation" -> clipped to [0, capacity]
-# origin: local time on D-1 when the forecast is made (live run 13:00 UTC = 14:00 CET; conservative in CEST)
+# origin: local time on D-1 when the forecast is made (the live run is later, 16:15 Madrid)
+# gate:   local time on D-1 when Predico closes the D+1 session
 
 [spain_mfrr_energy]
 predico_resource = "spain_mfrr_energy"
@@ -11,6 +12,7 @@ unit = "MWh"
 kind = "market"
 timezone = "Europe/Madrid"
 origin = "14:00"
+gate = "17:00"
 test_period = ["2025-11-01", "2026-10-31"]
 
 [spain_mfrr_price]
@@ -20,4 +22,5 @@ unit = "EUR/MWh"
 kind = "market"
 timezone = "Europe/Madrid"
 origin = "14:00"
+gate = "17:00"
 test_period = ["2025-11-01", "2026-10-31"]

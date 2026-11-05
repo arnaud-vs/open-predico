@@ -96,7 +96,7 @@ Rules enforced by the harness:
 
 - **History start:** 10 Dec 2024 (Spain joins MARI; mFRR price 2197 starts that day). Earlier data is a different market design (old tertiary prices 676/677, ~20% no-activation quarter-hours); optional for volume pretraining only. Day-ahead price is hourly-repeated until 30 Sep 2025. All 15-min series have a gap 28 Apr – 6 May 2025 (Iberian blackout).
 - **Test period:** 1 Nov 2025 – 31 Oct 2026, one year, no validation split. Report results per month too: levels and spread shift inside the year (price mean ~100 → ~157 EUR/MWh in Jul–Oct 2026). ML models handle their own train/validation split without leakage.
-- **Rolling origin:** for each target day, origin = 14:00 Madrid on D-1 (live run 13:00 UTC = 14:00 CET, after OMIE results and PBF at ~13:45; one hour conservative in summer), so the backtest never sees more than live does.
+- **Rolling origin:** for each target day, origin = 14:00 Madrid on D-1 (after OMIE results and PBF at ~13:45). Live runs later (16:15), so it sees at least what the backtest saw; a 16:30-origin test scored slightly better.
 - **Storage:** Parquet on Hugging Face (`open-predico/benchmark`), versioned (`v1`, `v2`, …). New feature groups are contributed as build scripts; the maintainer publishes the next dataset version. No data files in git.
 - **Known limitation:** some ESIOS forecast indicators are overwritten after publication, so their historical values are approximate. Flagged per feature. Live runs store their exact inputs, which gives true vintages going forward.
 - **Target data quality (ESIOS, 2025-11 to 2026-10):** ~1.5% of quarter-hours missing in both 10250 and 2197 (263 in Nov 2025, rest scattered, gaps ≤ 2 h). Treated as no activation: volume = 0. Price: fill with the mid-price at 100 MW depth ((price to cover 100 MW up + price to cover 100 MW down) / 2, available bids only) from ENTSO-E Balancing Energy Bids (12.3.B/C, Spanish bids only; see Missing price above). Until the fill is applied, price = NaN (baseline ignores it). Predico's scoring of missing truth is unknown; to confirm. Values hit 1500 (MWh and EUR/MWh) once each in the year; read as a cap, kept as is.
@@ -113,14 +113,14 @@ Rules enforced by the harness:
 ## Live operations
 
 - **Continuous submission only:** one forecast per day covering D+1 to D+10. Predico slices it at each gate closure. If a run fails, yesterday's forecast still covers tomorrow. D+1 comes from the live config (`t0gamma_cov_ctx90`: best Apache-2.0 model in the backtest, 2026-11-03), D+2 to D+10 from the slot-climatology baseline. EDP program pays D+1 only (Predico programs page, Nov 2026), so D+2 to D+10 exist only as a fallback.
-- **Schedule (GitHub Actions, UTC):** `submit` at 13:00 (14:00 CET / 15:00 CEST, after OMIE results) with a retry at 14:00 (≥1 h before the gate in both CET and CEST); `--check` at 15:15, 15:30 and 15:45 (inside the session, which opens the hour before the gate: Predico gates are hourly, `gate_closure` in the API is authoritative) resubmits if an open challenge isn't `ready` in `market/session/coverage`; `publish` at 16:30.
+- **Scheduler: Modal** (`live/modal_app.py`, Starter plan). GitHub Actions cron was dropped (2026-11-05): scheduled runs started 5-7 h late. Times are Madrid local: `submit` at 16:15, `check` at 16:30 and 16:45 resubmits only if an open challenge isn't `ready` in `market/session/coverage` (the session opens the hour before the 17:00 gate; `gate_closure` in the API is authoritative). Cost ~$0.5/month, inside the $1 free credit; check Modal's usage page. `publish` at 17:30 (not built yet).
 - **Late features:** filled with NaN and recorded; the retry submits the full forecast if the data has arrived. The latest submission counts.
-- **`submit`:** build features → predict → validate (full grid, no NaN, sorted, ≤ 240 h) → submit → check coverage → save forecast and exact inputs to HF `live-private`. Never prints forecast values (Actions logs are public).
+- **`submit`:** build features → predict → validate (full grid, no NaN, sorted, ≤ 240 h) → submit → check coverage → save forecast and exact inputs to HF `live-private`. Never prints forecast values (logs may be shared; the repo is public).
 - **`publish`:** after gate closure, copy closed days to public HF `live`; fetch actuals and Predico's official scores for us; recompute scores until the month freezes (day 7 of the next month); fail if today's submission is missing.
-- **Monitoring:** GitHub failure emails plus the `publish` check (which catches skipped scheduled runs).
-- **Secrets:** GitHub `production` environment, `main` only: `HF_TOKEN` (fine-grained, org-scoped), `ESIOS_TOKEN`, `ENTSOE_API_KEY`, `PREDICO_EMAIL`, `PREDICO_PASSWORD`.
+- **Monitoring:** Modal failure alerts (enable in workspace settings) plus the `publish` check (which catches skipped runs).
+- **Secrets:** Modal secret `open-predico`: `HF_TOKEN` (fine-grained, org-scoped), `ESIOS_TOKEN`, `PREDICO_EMAIL`, `PREDICO_PASSWORD`, `PREDICO_PLAYGROUND_URL` and `PREDICO_URL` (scheme optional). `URL_VAR` in `live/predico.py` picks one: the playground until production unlocks.
 - **Before go-live:** dry run on the Predico playground; historical forecast export from the backtest if required.
-- **Playground:** set `PREDICO_URL=https://playground.predico.inesctec.pt` (scheme included). Playground runs skip the HF upload. Both Spain resources and `germany_wind_50hertz_ca` exist there (checked 2026-11-03). Auth: access token ~1 h, refresh 24 h, no long-lived API key, so the password stays a secret.
+- **Playground:** production unlocks after 5 days of good playground predictions, so the live record starts on the playground. Every run is stored and published with `env` = `playground` or `production`. Both Spain resources and `germany_wind_50hertz_ca` exist there (checked 2026-11-03). Auth: access token ~1 h, refresh 24 h, no long-lived API key, so the password stays a secret.
 
 ## Adding a target (next: 50Hertz wind)
 
@@ -131,7 +131,7 @@ Rules enforced by the harness:
 - **Time zone:** `data/groups.py` (`TZ`, calendar, `holiday_es`) and `live/submit.py` (`TZ`) assume Europe/Madrid. Use the target's `timezone`; German holidays need their own calendar column.
 - **`kind = "generation"`:** `config.py` requires a `capacity`, but nothing clips to [0, capacity] yet. Add it after predict, in both the backtest and live.
 - **Benchmark:** build the target's groups into the next HF dataset version, backtest the baseline plus the TSFMs, and pick a live config with a commercial-use licence (TimesFM 3 is out).
-- **Live:** gate 15:00 CET (14:00 UTC), session 13:00 to 14:00 UTC, so it needs its own run (before 13:00 UTC) and its own `--check` times. Add a `--target` filter to `live/submit.py` and a second schedule in `submit.yml`, or a second workflow.
+- **Live:** gate 15:00 CET (14:00 UTC), session 13:00 to 14:00 UTC, so it needs its own run (before 13:00 UTC) and its own `--check` times. Add a `--target` filter to `live/submit.py` and two more functions in `live/modal_app.py` (Starter allows 5 crons).
 
 ## Predico rules that shape the repo
 
@@ -142,11 +142,11 @@ Rules enforced by the harness:
 
 ## Dashboard
 
-Hugging Face Space (`open-predico/dashboard`): Streamlit run in the browser with stlite, so a free static Space (Docker and Gradio Spaces need a paid plan for orgs). Tabs:
+Hugging Face Space (`open-predico/dashboard`), a free static Space: `index.html` + `app.js` (uPlot, no framework) draw JSON that `dashboard/build.py` precomputes from the HF datasets (2026-11-05: replaced the stlite/Streamlit app, which was slow). Gridual palette. A target selector at the top; targets other than Spain mFRR show "coming soon". Tabs:
 
 - **Backtest:** configs discovered from `predictions/backtest/*/` on HF. Leaderboard modelled on GIFT-Eval: one row per config with type (baseline / foundation model / ML), RMSE and Winkler per target normalised to `slot_climatology_28d` (ratio of mean daily scores on common days), coverage, aggregate score (geometric mean of the normalised scores) and rank. Win-rate matrix per metric (share of common days where A beats B), errors by month/hour/weekday, day viewer.
 - **Target data:** `v1/target.parquet` explored: time series (daily or 15-min window), patterns by quarter-hour/weekday/month, distribution, missing values and zeros per day, price vs energy.
-- **Live:** submitted forecasts vs actuals for any day, daily scores over time next to Predico's official score, rank if Predico allows publishing it.
+- **Live:** from HF `live` (written by `live/publish.py` at 17:30 Madrid, after the gate): continuous forecast dotted, days Predico confirmed as submitted solid underneath, actuals, submission record per day, scores vs the same-run climatology baseline, model and input features. Later: Predico's official score, rank if Predico allows publishing it.
 
 ## Repo meta
 

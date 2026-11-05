@@ -17,3 +17,4 @@ __pycache__/
 
 # Agent worktrees
 .claude/worktrees/
+dashboard/data/

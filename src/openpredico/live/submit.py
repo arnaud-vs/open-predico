@@ -19,7 +19,8 @@ from openpredico.live.predico import Predico
 from openpredico.models.baselines import slot_climatology
 from openpredico.models.tsfm import t0
 
-MODEL = "theforecastingcompany/t0-gamma"  # config t0gamma_cov_ctx90, best Apache-2.0 model
+MODEL = "theforecastingcompany/t0-gamma"  # best Apache-2.0 model in the backtest
+CONFIG, FALLBACK = "t0gamma_cov_ctx90", "slot_climatology_28d"  # backtest config names
 CONTEXT_DAYS = 90
 HORIZON_DAYS = 10
 TZ = "Europe/Madrid"
@@ -53,7 +54,7 @@ def forecast(
     past = past.drop(columns=future_cols)
     d1 = predict(past, future, days[:1])
     rest = slot_climatology(past.iloc[:, 0], days[1:], tz=tz)  # D+2..D+10: unpaid fallback
-    fc = pd.concat([d1, rest])
+    fc = pd.concat([d1.assign(model=CONFIG), rest.assign(model=FALLBACK)])
     # Predico accepts at most 240 h ahead, so the tail of D+10 is cut
     return fc[fc.index <= now + pd.Timedelta(hours=240)], pd.concat([past, future], axis=1)
 
@@ -78,10 +79,10 @@ def main(dry_run: bool) -> None:
         print(f"{name}: {len(fc)} steps {fc.index.min()} .. {fc.index.max()}")  # no values
         if dry_run:
             continue
-        if "playground" not in client.api:  # playground runs stay out of the live record
-            run = f"{name}/{now:%Y-%m-%dT%H%MZ}"
-            hf.upload(fc, "live-private", f"forecasts/{run}.parquet", f"Forecast {run}")
-            hf.upload(inputs, "live-private", f"inputs/{run}.parquet", f"Inputs {run}")
+        env = "playground" if "playground" in client.api else "production"
+        run = f"{name}/{now:%Y-%m-%dT%H%MZ}"
+        hf.upload(fc.assign(env=env), "live-private", f"forecasts/{run}.parquet", f"Forecast {run}")
+        hf.upload(inputs, "live-private", f"inputs/{run}.parquet", f"Inputs {run}")
         client.submit_continuous(client.resource_id(target["predico_resource"]), fc)
         print(f"{name}: submitted")
     if client:

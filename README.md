@@ -14,7 +14,7 @@ Status: early, working end to end. The design and every decision so far live in 
 ESIOS ─► configs/groups.toml ─► feature frame (15-min UTC) ─► model ─► q10/q50/q90
          (one line per column,                                          │
           future vs past availability)                 backtest ◄───────┤
-                                                       live submit ◄────┘ (daily, GitHub Actions)
+                                                       live submit ◄────┘ (daily, Modal)
 ```
 
 - **Data:** feature groups are declared in `configs/groups.toml`; one runner builds any group. Each column says whether it is known for the target day before the gate (`future`, e.g. day-ahead price) or only up to the forecast time (`past`, e.g. mFRR actuals). The backtest enforces this, so no lookahead.
