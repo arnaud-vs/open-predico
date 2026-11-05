@@ -41,7 +41,7 @@ def main() -> None:
     client, run_rows = Predico(), []
     HfApi().create_repo(f"{hf.ORG}/live", repo_type="dataset", private=False, exist_ok=True)
     for name, t in load_targets().items():
-        runs = {}
+        runs, rows = {}, []
         # ponytail: re-downloads every run daily (~2 files/run); keep a cursor if it gets slow
         for f in sorted(f for f in files if f.startswith(f"forecasts/{name}/")):
             stamp = f.rsplit("/", 1)[1].removesuffix(".parquet")
@@ -54,7 +54,7 @@ def main() -> None:
             fc[["b10", "b50", "b90"]] = base.reindex(fc.index).to_numpy()
             runs[run] = fc = fc.assign(model=fc.get("model", CONFIG))  # pre-tag runs: CONFIG
             features = [c for c in inputs.columns if c != TARGET_COLUMNS[name]]
-            run_rows.append(
+            rows.append(
                 {
                     "target": name,
                     "run": run,
@@ -62,9 +62,9 @@ def main() -> None:
                     "features": ",".join(features),
                 }
             )
-        if not runs:
-            continue
-        out = scored(runs, t["timezone"], t["gate"], now)
+        out = scored(runs, t["timezone"], t["gate"], now) if runs else pd.DataFrame()
+        if out.empty:
+            continue  # no gate has passed since our first run
         indicator = int(t["truth"].removeprefix("esios:"))
         start, end = (x.tz_localize(None).isoformat() for x in (out.index.min(), now))
         truth = esios.fetch(indicator, start, end)
@@ -76,6 +76,7 @@ def main() -> None:
         confirmed = client.submitted_days(t["predico_resource"])
         out["submitted"] = out.index.tz_convert(t["timezone"]).strftime("%Y-%m-%d").isin(confirmed)
         hf.upload(out, "live", f"forecasts/{name}.parquet", f"Publish {name} {now:%Y-%m-%d}")
+        run_rows += rows
         print(f"{name}: {out.index.normalize().nunique()} days from {len(runs)} runs")
     if run_rows:
         hf.upload(pd.DataFrame(run_rows), "live", "runs.parquet", f"Runs {now:%Y-%m-%d}")

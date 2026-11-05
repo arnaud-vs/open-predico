@@ -6,7 +6,7 @@ colorTo: gray
 sdk: static
 pinned: false
 license: apache-2.0
-short_description: Live forecasts, backtest leaderboard and data for open-predico
+short_description: Live forecasts and backtests for open-predico
 ---
 
 Dashboard for [open-predico](https://github.com/arnaud-vs/open-predico): live forecasts (published after each gate), the backtest leaderboard, the target series and the input catalog. Reads the public datasets [open-predico/benchmark](https://huggingface.co/datasets/open-predico/benchmark) and `open-predico/live`.

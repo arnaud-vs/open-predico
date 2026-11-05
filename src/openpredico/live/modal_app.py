@@ -18,6 +18,7 @@ image = (
     )
     .add_local_python_source("openpredico")
     .add_local_dir("configs", "/configs")  # config.CONFIGS resolves to /configs in the container
+    .add_local_dir("dashboard", "/dashboard", ignore=["data", "__pycache__"])
 )
 app = modal.App("open-predico", image=image, secrets=[modal.Secret.from_name("open-predico")])
 # Gate 17:00 Madrid (Predico: "17:00 CET"); session opens the hour before.
@@ -42,7 +43,13 @@ def check() -> None:
 
 @app.function(schedule=modal.Cron("30 17 * * *", timezone=TZ), cpu=1.0, memory=2048, timeout=1800)
 def publish() -> None:
-    """After the gate: copy what Predico scored, with actuals, to the public HF `live` dataset."""
+    """After the gate: publish what Predico scored, then rebuild and push the dashboard Space."""
+    import subprocess
+    import sys
+
     from openpredico.live import publish
 
-    publish.main()
+    try:
+        publish.main()
+    finally:  # the dashboard refreshes even if publishing failed (it shows what is there)
+        subprocess.run([sys.executable, "/dashboard/build.py", "--upload"], check=True)
