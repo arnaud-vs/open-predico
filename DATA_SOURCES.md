@@ -40,6 +40,7 @@ Live read-only smoke check (downloads one day; prints metadata, not values):
 ```python
 import pandas as pd
 from openpredico.data.fiftyhertz import fetch_frame
+
 frame = fetch_frame("actual", "2026-11-03T23:00Z", "2026-11-04T23:00Z")
 assert len(frame) == 96 and frame.index.is_unique
 assert frame.index.to_series().diff().dropna().eq(pd.Timedelta("15min")).all()
