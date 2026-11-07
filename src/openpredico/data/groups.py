@@ -12,12 +12,12 @@ import pandas as pd
 from dateutil.easter import easter
 
 from openpredico.config import CONFIGS
-from openpredico.data import entsoe_bids, esios, hf
+from openpredico.data import entsoe_bids, esios, fiftyhertz, hf
 
 TZ = "Europe/Madrid"
 COLUMN_KEYS = {"source", "geo", "fill", "availability"}
 AVAILABILITY = {"future", "past"}
-PREFIXES = {"esios", "calendar", "entsoe_bids"}
+PREFIXES = {"esios", "calendar", "entsoe_bids", "fiftyhertz"}
 # ponytail: bid ladder built locally by `entsoe_bids ladder` (File Library login needed), not
 # fetched here. Put it at this path before building the `mfrr_bids` group.
 BIDS_LADDER = CONFIGS.parent / "data" / "bids_ladder.parquet"
@@ -36,6 +36,12 @@ def load_groups(path: Path = CONFIGS / "groups.toml") -> dict[str, dict]:
                 raise ValueError(f"{where}: availability must be one of {sorted(AVAILABILITY)}")
             if c["source"].split(":")[0] not in PREFIXES:
                 raise ValueError(f"{where}: source prefix must be one of {sorted(PREFIXES)}")
+            if c["source"].startswith("fiftyhertz:"):
+                kind, _ = fiftyhertz.source_key(c["source"].split(":", 1)[1])
+                if "geo" in c or "fill" in c:
+                    raise ValueError(f"{where}: 50Hertz has a fixed area; filling is not allowed")
+                if kind == "forecast" and c["availability"] == "future":
+                    raise ValueError(f"{where}: 18:00 forecast publication is after the 15:00 gate")
             if name in seen_columns:
                 raise ValueError(f"{where}: duplicate column name")
             source = (c["source"], c.get("geo"))
@@ -60,6 +66,13 @@ def build(group: str, start: str, end: str) -> pd.DataFrame:
             continue
         if prefix == "entsoe_bids":
             df[name] = entsoe_bids.to_series(key, BIDS_LADDER).reindex(grid)
+            continue
+        if prefix == "fiftyhertz":
+            kind, component = fiftyhertz.source_key(key)
+            cache_key = (prefix, kind)
+            if cache_key not in raw:
+                raw[cache_key] = fiftyhertz.fetch_frame(kind, start, end)
+            df[name] = raw[cache_key][component].reindex(grid)
             continue
         if key not in raw:
             raw[key] = esios.fetch_values(int(key), start, end)

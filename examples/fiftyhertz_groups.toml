@@ -1,0 +1,7 @@
+# Standalone example, intentionally outside active configs/groups.toml: the current
+# Spanish experiment loads every active group. Enable after per-target groups exist.
+[fiftyhertz_wind]
+wind_50hertz_total = { source = "fiftyhertz:actual_total", availability = "past" }
+wind_50hertz_onshore = { source = "fiftyhertz:actual_onshore", availability = "past" }
+wind_50hertz_offshore = { source = "fiftyhertz:actual_offshore", availability = "past" }
+wind_50hertz_sum = { source = "fiftyhertz:actual_sum", availability = "past" }
