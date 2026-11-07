@@ -26,6 +26,7 @@ CALENDAR = {
     "qh_of_day": "Quarter-hour of the local (Madrid) day, 0-99.",
     "weekday": "Local day of week, 0 = Monday.",
     "holiday_es": "Spanish national holiday flag (fixed dates plus Good Friday).",
+    "holiday_de": "German national holiday flag (fixed dates plus Easter-based days).",
     "dst_switch_day": "Flag for the local days with 92 or 100 quarter-hours (DST switch).",
 }
 EXTRA = [  # hand-written: sources outside ESIOS's indicator lists

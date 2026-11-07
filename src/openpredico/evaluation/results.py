@@ -13,26 +13,29 @@ import pandas as pd
 
 from openpredico.config import load_targets
 from openpredico.data.hf import download
+from openpredico.evaluation.experiment import NOT_IN_V1
 from openpredico.evaluation.metrics import daily_scores
 
 RESULTS = Path(__file__).resolve().parents[3] / "results"
 
 
-def score(preds: pd.DataFrame) -> pd.DataFrame:
-    """Daily scores of one prediction file; the `obs` column is the truth."""
-    return daily_scores(preds[["q10", "q50", "q90"]], preds.obs)
+def score(preds: pd.DataFrame, tz: str = "Europe/Madrid") -> pd.DataFrame:
+    """Daily scores of one prediction file (days in `tz`); the `obs` column is the truth."""
+    return daily_scores(preds[["q10", "q50", "q90"]], preds.obs, tz)
 
 
 def results(config: str, local_dir: Path | None = None) -> pd.DataFrame:
     """Daily scores for every target of `config`, from `local_dir` if given, else from HF."""
     out = []
-    for target in load_targets():
+    for target, t in load_targets().items():
+        if NOT_IN_V1 & set(t["groups"]):
+            continue  # no backtest yet
         path = f"predictions/backtest/{config}/{target}.parquet"
         if local_dir:
             preds = pd.read_parquet(local_dir / config / f"{target}.parquet")
         else:
             preds = download("benchmark", path)
-        s = score(preds).reset_index()
+        s = score(preds, t["timezone"]).reset_index()
         s.insert(0, "target", target)
         s["day"] = s.day.dt.strftime("%Y-%m-%d")
         out.append(s)

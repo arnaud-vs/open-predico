@@ -36,3 +36,14 @@ def backtest(
         future = history.loc[history.index < stop, cols]
         out.append(predict(past.drop(columns=cols), future, target))
     return pd.concat(out)
+
+
+def clip(fc: pd.DataFrame, target: dict) -> pd.DataFrame:
+    """Generation targets: q10/q50/q90 clipped to [0, capacity] (keeps them sorted).
+
+    Market targets (may be negative) are returned unchanged.
+    """
+    if target["kind"] != "generation":
+        return fc
+    q = ["q10", "q50", "q90"]
+    return fc.assign(**{c: fc[c].clip(0, target["capacity"]) for c in q})

@@ -1,7 +1,8 @@
 # Feature groups. See PLAN.md > Data and features.
 #
 # One table per group, one line per column:
-#   source       "esios:<id>", "calendar:<name>" (computed) or "entsoe_bids:<column>" (bid ladder)
+#   source       "esios:<id>", "calendar:<name>" (computed), "entsoe_bids:<column>" (bid ladder)
+#                or "fiftyhertz:<kind>_<component>" (50Hertz website, data/fiftyhertz.py)
 #   geo          ESIOS geo_id, for indicators published for several geos
 #   fill         value for missing quarter-hours (none = keep NaN)
 #   availability "future" = known for the target day before the gate
@@ -83,3 +84,13 @@ qh_of_day = { source = "calendar:qh_of_day", availability = "future" }
 weekday = { source = "calendar:weekday", availability = "future" }
 holiday_es = { source = "calendar:holiday_es", availability = "future" }
 dst_switch_day = { source = "calendar:dst_switch_day", availability = "future" }
+
+# --- germany_wind_50hertz_ca ---
+# 50Hertz control area wind, MW. Its own D-1 forecast is published at 18:00, after the gate.
+[wind_50hertz]
+wind_50hertz = { source = "fiftyhertz:actual_sum", availability = "past" }  # onshore + offshore
+wind_50hertz_onshore = { source = "fiftyhertz:actual_onshore", availability = "past" }
+wind_50hertz_offshore = { source = "fiftyhertz:actual_offshore", availability = "past" }
+
+[calendar_de]
+holiday_de = { source = "calendar:holiday_de", availability = "future" }

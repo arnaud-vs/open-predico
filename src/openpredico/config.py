@@ -12,6 +12,8 @@ CONFIGS = Path(__file__).resolve().parents[2] / "configs"
 TARGET_KEYS = {
     "predico_resource",
     "truth",
+    "column",
+    "groups",
     "unit",
     "kind",
     "timezone",

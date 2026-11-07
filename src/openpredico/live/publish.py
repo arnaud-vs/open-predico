@@ -19,7 +19,8 @@ import pandas as pd
 from huggingface_hub import HfApi
 
 from openpredico.config import load_targets
-from openpredico.data import esios, hf
+from openpredico.data import hf
+from openpredico.data.groups import fetch_source
 from openpredico.evaluation.backtest import PUBLICATION_LAG
 from openpredico.evaluation.experiment import TARGET_COLUMNS
 from openpredico.live.predico import Predico
@@ -75,9 +76,8 @@ def main() -> None:
         out = sub if out.empty else out.join(sub, how="outer")
         if out.empty:
             continue  # nothing gated yet
-        indicator = int(t["truth"].removeprefix("esios:"))
         start, end = (x.tz_localize(None).isoformat() for x in (out.index.min(), now))
-        truth = esios.fetch(indicator, start, end)
+        truth = fetch_source(t["truth"], start, end)
         known = out.index < now - PUBLICATION_LAG
         obs = truth.reindex(out.index)
         if t["unit"] == "MWh":

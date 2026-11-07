@@ -1,6 +1,7 @@
 """Build feature groups (configs/groups.toml) on the 15-min UTC grid.
 
 Benchmark build: python -m openpredico.data.groups --start 2024-12-10 --end 2026-11-01 --version v1
+    [--groups wind_50hertz,calendar_de]
 """
 
 import argparse
@@ -11,10 +12,10 @@ from pathlib import Path
 import pandas as pd
 from dateutil.easter import easter
 
-from openpredico.config import CONFIGS
+from openpredico.config import CONFIGS, load_targets
 from openpredico.data import entsoe_bids, esios, fiftyhertz, hf
 
-TZ = "Europe/Madrid"
+TZ = "Europe/Madrid"  # ESIOS local time; calendar default (Spain's targets)
 COLUMN_KEYS = {"source", "geo", "fill", "availability"}
 AVAILABILITY = {"future", "past"}
 PREFIXES = {"esios", "calendar", "entsoe_bids", "fiftyhertz"}
@@ -52,8 +53,11 @@ def load_groups(path: Path = CONFIGS / "groups.toml") -> dict[str, dict]:
     return groups
 
 
-def build(group: str, start: str, end: str) -> pd.DataFrame:
-    """One group's columns on the 15-min UTC grid [start, end), with `fill` applied."""
+def build(group: str, start: str, end: str, tz: str = TZ) -> pd.DataFrame:
+    """One group's columns on the 15-min UTC grid [start, end), with `fill` applied.
+
+    `tz`: the target's time zone, for `calendar:` columns.
+    """
     start, end = pd.Timestamp(start, tz="UTC"), pd.Timestamp(end, tz="UTC")
     grid = pd.date_range(start, end, freq="15min", inclusive="left", name="time")
     columns = load_groups()[group]
@@ -62,7 +66,7 @@ def build(group: str, start: str, end: str) -> pd.DataFrame:
     for name, c in columns.items():
         prefix, key = c["source"].split(":")
         if prefix == "calendar":
-            df[name] = CALENDAR[key](grid)
+            df[name] = CALENDAR[key](grid, tz)
             continue
         if prefix == "entsoe_bids":
             df[name] = entsoe_bids.to_series(key, BIDS_LADDER).reindex(grid)
@@ -82,6 +86,17 @@ def build(group: str, start: str, end: str) -> pd.DataFrame:
     return df.fillna(fills)
 
 
+def fetch_source(source: str, start: str, end: str) -> pd.Series:
+    """One `esios:<id>` or `fiftyhertz:<key>` series over UTC [start, end), native resolution."""
+    prefix, key = source.split(":")
+    if prefix == "esios":
+        return esios.fetch(int(key), start, end)
+    if prefix == "fiftyhertz":
+        # ponytail: one request per local day, 2 s apart; fine for a few months of truth
+        return fiftyhertz.fetch(key, start, end)
+    raise ValueError(f"no fetcher for source {source!r}")
+
+
 def to_grid(s: pd.Series, grid: pd.DatetimeIndex) -> pd.Series:
     """Put a native-resolution series on the 15-min grid, repeating hourly values per quarter.
 
@@ -97,38 +112,46 @@ def to_grid(s: pd.Series, grid: pd.DatetimeIndex) -> pd.Series:
     return out[~out.index.duplicated()].reindex(grid)
 
 
-def _local(grid: pd.DatetimeIndex) -> pd.DatetimeIndex:
-    return grid.tz_convert(TZ)
-
-
-def qh_of_day(grid: pd.DatetimeIndex) -> pd.Index:
-    local = _local(grid)
+def qh_of_day(grid: pd.DatetimeIndex, tz: str = TZ) -> pd.Index:
+    local = grid.tz_convert(tz)
     return local.hour * 4 + local.minute // 15
 
 
-def weekday(grid: pd.DatetimeIndex) -> pd.Index:
-    return _local(grid).weekday  # Monday = 0
+def weekday(grid: pd.DatetimeIndex, tz: str = TZ) -> pd.Index:
+    return grid.tz_convert(tz).weekday  # Monday = 0
 
 
-def holiday_es(grid: pd.DatetimeIndex) -> pd.Index:
-    """1 on Spanish national holidays (local date), else 0."""
-    # ponytail: national holidays only; regional ones (and moved Sunday holidays) left out.
-    local = _local(grid)
-    fixed = [(1, 1), (1, 6), (5, 1), (8, 15), (10, 12), (11, 1), (12, 6), (12, 8), (12, 25)]
+def _holidays(local: pd.DatetimeIndex, fixed: list, easter_offsets: list) -> pd.Index:
     days = set()
     for y in range(local.year.min(), local.year.max() + 1):
-        days |= {date(y, m, d) for m, d in fixed} | {easter(y) - timedelta(days=2)}
+        days |= {date(y, m, d) for m, d in fixed}
+        days |= {easter(y) + timedelta(days=k) for k in easter_offsets}
     return pd.Index(local.date).isin(days).astype(int)
 
 
-def dst_switch_day(grid: pd.DatetimeIndex) -> pd.Index:
+def holiday_es(grid: pd.DatetimeIndex, tz: str = TZ) -> pd.Index:
+    """1 on Spanish national holidays (local date), else 0."""
+    # ponytail: national holidays only; regional ones (and moved Sunday holidays) left out.
+    fixed = [(1, 1), (1, 6), (5, 1), (8, 15), (10, 12), (11, 1), (12, 6), (12, 8), (12, 25)]
+    return _holidays(grid.tz_convert(tz), fixed, [-2])  # Good Friday
+
+
+def holiday_de(grid: pd.DatetimeIndex, tz: str = "Europe/Berlin") -> pd.Index:
+    """1 on German national holidays (local date), else 0."""
+    # ponytail: national only. Reformation Day (31 Oct) is a holiday in most of the 50Hertz
+    # area but not in Berlin; add regional days if they ever matter for wind.
+    fixed = [(1, 1), (5, 1), (10, 3), (12, 25), (12, 26)]
+    return _holidays(grid.tz_convert(tz), fixed, [-2, 1, 39, 50])  # Good Fri ... Whit Monday
+
+
+def dst_switch_day(grid: pd.DatetimeIndex, tz: str = TZ) -> pd.Index:
     """1 on local days that are 23 h or 25 h long, else 0."""
-    day = _local(grid).normalize()
+    day = grid.tz_convert(tz).normalize()
     next_day = (day + pd.Timedelta(hours=26)).normalize()
     return ((next_day - day) != pd.Timedelta(days=1)).astype(int)
 
 
-CALENDAR = {f.__name__: f for f in (qh_of_day, weekday, holiday_es, dst_switch_day)}
+CALENDAR = {f.__name__: f for f in (qh_of_day, weekday, holiday_es, holiday_de, dst_switch_day)}
 
 
 def main() -> None:
@@ -136,10 +159,14 @@ def main() -> None:
     p.add_argument("--start", required=True)
     p.add_argument("--end", required=True)
     p.add_argument("--version", required=True)
+    p.add_argument("--groups", help="comma-separated; default: every group")
     args = p.parse_args()
     hf.HfApi().create_repo(f"{hf.ORG}/benchmark", repo_type="dataset", private=False, exist_ok=True)
-    for group in load_groups():
-        df = build(group, args.start, args.end)
+    targets = load_targets().values()
+    for group in args.groups.split(",") if args.groups else load_groups():
+        # calendar columns in the time zone of the (first) target using the group
+        tz = next((t["timezone"] for t in targets if group in t["groups"]), TZ)
+        df = build(group, args.start, args.end, tz)
         print(group, df.shape, df.isna().mean().round(3).to_dict(), flush=True)
         hf.upload(
             df,
