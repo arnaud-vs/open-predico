@@ -34,6 +34,7 @@ TYPES = {  # config name prefix -> model type; anything else is ML
     "t0": "foundation model",
 }
 STEP = pd.Timedelta("15min")
+LIVE_COLUMNS = ("q10", "q50", "q90", "s10", "s50", "s90", "obs", "b10", "b50", "b90")
 
 
 def arr(values) -> list:
@@ -132,8 +133,11 @@ def live_frames(demo: bool) -> tuple[dict[str, pd.DataFrame], pd.DataFrame | Non
         day = fc.index.tz_convert("Europe/Madrid").strftime("%Y-%m-%d")
         fc = fc[day != sorted(set(day))[6]]  # one missed day
         day = fc.index.tz_convert("Europe/Madrid").strftime("%Y-%m-%d")
-        fc["submitted"] = ~np.isin(day, sorted(set(day))[-3:-1])
+        registered = ~np.isin(day, sorted(set(day))[-3:-1])
+        for q in ("10", "50", "90"):
+            fc[f"s{q}"] = fc[f"q{q}"].where(registered)
         fc["model"], fc["env"] = LIVE_CONFIG, "demo"
+        fc.loc[day == sorted(set(day))[2], ["q10", "q50", "q90"]] = np.nan  # registered, no run
         frames[t] = fc
         cols = [c for g, cs in load_groups().items() if g not in NOT_IN_V1 for c in cs]
         rows.append(
@@ -155,15 +159,15 @@ def live(out: Path, demo: bool) -> None:
     data = {"available": True, "demo": demo, "targets": {}}
     for t, df in frames.items():
         grid = pd.date_range(df.index.min(), df.index.max(), freq=STEP)
-        g = df.reindex(grid)
+        g = df.reindex(grid).reindex(columns=[*LIVE_COLUMNS, "env"])
         target_runs = runs[runs.target.map(SHORT) == t].sort_values("run")
         last = target_runs.iloc[-1]
         data["targets"][t] = {
             "start": secs(grid[0]),
-            **{c: arr(g[c]) for c in ("q10", "q50", "q90", "obs", "b10", "b50", "b90")},
-            "submitted": [None if pd.isna(v) else int(bool(v)) for v in g.submitted],
+            # q*: continuous forecast at the gate; s*: what Predico registered; b*: climatology
+            **{c: arr(g[c]) for c in LIVE_COLUMNS},
             "model": last.model,
-            "env": str(df.env.iloc[-1]) if "env" in df else "playground",
+            "env": str(df.env.dropna().iloc[-1]) if "env" in df else "playground",
             "runs": len(target_runs),
             "last_run": str(last.run),
             "features": [f for f in str(last.features).split(",") if f],

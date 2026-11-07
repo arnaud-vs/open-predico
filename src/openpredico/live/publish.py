@@ -4,9 +4,10 @@ For each target day whose gate has passed, Predico sliced the latest run submitt
 gate, so that run's rows are what we publish. Days with no run before the gate stay absent (the
 dashboard shows them as missed). Rebuilt from `live-private` on every run, so it is idempotent.
 
-    forecasts/<target>.parquet  q10/q50/q90, model, env, run, obs, b10/b50/b90 (slot climatology
-                                from the same run's inputs, the baseline for normalised scores),
-                                submitted (Predico registered a session submission that day)
+    forecasts/<target>.parquet  q10/q50/q90, model, env, run: our continuous forecast as sliced
+                                at the gate; s10/s50/s90: what Predico registered as our session
+                                submissions (also days from before the HF record); obs; b10/b50/b90
+                                (slot climatology from the same run's inputs, the baseline)
     runs.parquet                one row per run and target: model and input features
 
 Usage: python -m openpredico.live.publish
@@ -26,11 +27,16 @@ from openpredico.live.submit import CONFIG
 from openpredico.models.baselines import slot_climatology
 
 
+def gate_closes(index: pd.DatetimeIndex, tz: str, gate: str) -> pd.DatetimeIndex:
+    """Gate closure for each timestamp's target day: D-1 at `gate`, local time."""
+    d1 = (index.tz_convert(tz).normalize() - pd.DateOffset(days=1)).strftime("%Y-%m-%d")
+    return pd.DatetimeIndex(pd.to_datetime(d1 + " " + gate)).tz_localize(tz)
+
+
 def scored(runs: dict[pd.Timestamp, pd.DataFrame], tz: str, gate: str, now: pd.Timestamp):
     """Per quarter-hour, the row of the latest run before its day's gate, if that gate passed."""
     df = pd.concat([fc.assign(run=run) for run, fc in runs.items()])
-    d1 = (df.index.tz_convert(tz).normalize() - pd.DateOffset(days=1)).strftime("%Y-%m-%d")
-    closes = pd.DatetimeIndex(pd.to_datetime(d1 + " " + gate)).tz_localize(tz)
+    closes = gate_closes(df.index, tz, gate)
     df = df[(df.run.to_numpy() < closes) & (closes <= now)].sort_values("run", kind="stable")
     return df[~df.index.duplicated(keep="last")].sort_index()
 
@@ -63,8 +69,12 @@ def main() -> None:
                 }
             )
         out = scored(runs, t["timezone"], t["gate"], now) if runs else pd.DataFrame()
+        sub = client.submitted_forecasts(t["predico_resource"])
+        sub = sub[gate_closes(sub.index, t["timezone"], t["gate"]) <= now]  # never an open day
+        sub = sub.rename(columns=lambda c: "s" + c[1:])  # q50 -> s50
+        out = sub if out.empty else out.join(sub, how="outer")
         if out.empty:
-            continue  # no gate has passed since our first run
+            continue  # nothing gated yet
         indicator = int(t["truth"].removeprefix("esios:"))
         start, end = (x.tz_localize(None).isoformat() for x in (out.index.min(), now))
         truth = esios.fetch(indicator, start, end)
@@ -73,11 +83,10 @@ def main() -> None:
         if t["unit"] == "MWh":
             obs[known] = obs[known].fillna(0)  # missing quarter-hour = no activation (PLAN.md)
         out["obs"] = obs
-        confirmed = client.submitted_days(t["predico_resource"])
-        out["submitted"] = out.index.tz_convert(t["timezone"]).strftime("%Y-%m-%d").isin(confirmed)
         hf.upload(out, "live", f"forecasts/{name}.parquet", f"Publish {name} {now:%Y-%m-%d}")
         run_rows += rows
-        print(f"{name}: {out.index.normalize().nunique()} days from {len(runs)} runs")
+        days = out.index.tz_convert(t["timezone"]).normalize()
+        print(f"{name}: {days.nunique()} days, {days[out.s50.notna()].nunique()} registered")
     if run_rows:
         hf.upload(pd.DataFrame(run_rows), "live", "runs.parquet", f"Runs {now:%Y-%m-%d}")
 

@@ -63,14 +63,23 @@ class Predico:
         """Per-challenge readiness before the gate (`ready`, `source`)."""
         return self._get("market/session/coverage")
 
-    def submitted_days(self, resource_name: str) -> set[str]:
-        """Target days (YYYY-MM-DD) for which Predico registered a session submission of ours."""
+    def submitted_forecasts(self, resource_name: str) -> pd.DataFrame:
+        """What Predico registered as our session submissions: q10/q50/q90 on a UTC index."""
         subs = {
             s["market_session_challenge"] for s in self._get("market/challenge/submission")["data"]
         }
-        # ponytail: lists every challenge of the resource ever; filter by date if it gets slow
-        challenges = self._get("market/challenge", resource_name=resource_name)["data"]
-        return {str(c["target_day"])[:10] for c in challenges if c["id"] in subs}
+        # ponytail: refetches every challenge ever (one request each); add a date cursor if slow
+        rows = []
+        for c in self._get("market/challenge", resource_name=resource_name)["data"]:
+            if c["id"] in subs:
+                path = "market/challenge/submission/forecasts"
+                rows += self._get(path, challenge=c["id"])["data"]
+        if not rows:
+            return pd.DataFrame(columns=list(QUANTILES), index=pd.DatetimeIndex([], tz="UTC"))
+        df = pd.DataFrame(rows).assign(datetime=lambda d: pd.to_datetime(d.datetime, utc=True))
+        df = df.sort_values("registered_at")  # a resubmission replaces the earlier one
+        wide = df.pivot_table("value", "datetime", "variable", aggfunc="last")
+        return wide.reindex(columns=list(QUANTILES)).rename_axis(index=None, columns=None)
 
     def open_challenges(self, resource_name: str) -> list[dict]:
         return self._get("market/challenge", open_only="true", resource_name=resource_name)["data"]

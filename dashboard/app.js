@@ -174,15 +174,17 @@ function dailyScores(x, q10, q50, q90, obs) {
     if (o == null || m == null) continue;
     const key = madrid(x[i]).day;
     let d = days.get(key);
-    if (!d) days.set(key, (d = { key, t: x[i], n: 0, se: 0, wk: 0, cov: 0 }));
-    d.n++; d.se += (o - m) ** 2;
+    if (!d) days.set(key, (d = { key, t: x[i], n: 0, se: 0, ae: 0, wk: 0, cov: 0 }));
+    d.n++; d.se += (o - m) ** 2; d.ae += Math.abs(o - m);
     d.wk += q90[i] - q10[i] + 10 * Math.max(0, q10[i] - o) + 10 * Math.max(0, o - q90[i]);
     if (o >= q10[i] && o <= q90[i]) d.cov++;
   }
-  return [...days.values()].map(d => ({ key: d.key, t: d.t, n: d.n, rmse: Math.sqrt(d.se / d.n), winkler: d.wk / d.n, coverage: d.cov / d.n }));
+  return [...days.values()].map(d => ({ key: d.key, t: d.t, n: d.n, rmse: Math.sqrt(d.se / d.n), mae: d.ae / d.n, winkler: d.wk / d.n, coverage: d.cov / d.n }));
 }
 
 // --- Live --------------------------------------------------------------------------------
+// q*: our continuous forecast as it stood at the gate. s*: what Predico registered as our session
+// submission (the values it scores). b*: slot climatology from the same run's inputs.
 async function renderLive(root) {
   const live = await json("live.json");
   const head = `<div class="head"><div><h1>Live forecasts</h1><p class="lede">What we sent to Predico for Spain mFRR, published only after each gate (17:00 Madrid on D-1), next to the measured values from ESIOS.</p></div>`;
@@ -198,45 +200,54 @@ async function renderLive(root) {
   function draw() {
     const T = live.targets[target], unit = target === "energy" ? "MWh" : "EUR/MWh";
     const n = T.q50.length, x = Array.from({ length: n }, (_, i) => T.start + i * STEP);
-    const sub = T.q50.map((v, i) => (T.submitted[i] ? v : null));
-    const model = dailyScores(x, T.q10, T.q50, T.q90, T.obs);
+    const nul = () => new Array(n).fill(null);
+    const [s10, s50, s90] = ["s10", "s50", "s90"].map(k => T[k] ?? nul());
+    // Scored = Predico's registered values where it has them, else our continuous forecast.
+    const pick = (s, q) => s.map((v, i) => v ?? q[i]);
+    const e10 = pick(s10, T.q10), e50 = pick(s50, T.q50), e90 = pick(s90, T.q90);
+    const model = dailyScores(x, e10, e50, e90, T.obs);
     const base = new Map(dailyScores(x, T.b10, T.b50, T.b90, T.obs).map(d => [d.key, d]));
-    // Day record: submitted (Predico confirmed), series only, or missed.
+    // Day record: registered by Predico, continuous forecast only, or missed.
     const dayInfo = new Map();
     for (let i = 0; i < n; i++) {
       const key = madrid(x[i]).day;
       let d = dayInfo.get(key);
       if (!d) dayInfo.set(key, (d = { key, i0: i, i1: i, rows: 0, sub: 0 }));
       d.i1 = i;
-      if (T.q50[i] != null) d.rows++;
-      if (T.submitted[i]) d.sub++;
+      if (e50[i] != null) d.rows++;
+      if (s50[i] != null) d.sub++;
     }
     const record = [...dayInfo.values()];
     const counts = { sub: 0, cont: 0, miss: 0 };
     for (const d of record) d.state = d.rows === 0 ? "miss" : d.sub ? "sub" : "cont";
     record.forEach(d => counts[d.state]++);
+    const STATE = { sub: "submitted", cont: "not confirmed", miss: "missed" };
     const envNote = live.demo
-      ? `<div class="banner"><b>Demo data.</b> No live forecasts are published yet, so this shows the last 21 backtest days of <span class="mono">${esc(T.model)}</span> in the live format, with one missed day and two days without a Predico confirmation.</div>`
+      ? `<div class="banner"><b>Demo data.</b> No live forecasts are published yet, so this shows the last 21 backtest days of <span class="mono">${esc(T.model)}</span> in the live format.</div>`
       : T.env === "playground"
         ? `<div class="banner"><b>Qualifying on the Predico playground.</b> Production submissions open after five good days; scores below are playground runs.</div>`
         : "";
     const body = root.querySelector("#lv-body");
     body.innerHTML = `${envNote}
-      <div class="kpis" id="lv-kpis"></div>
       <div class="card">
-        <div class="card-head"><div><h2>Forecast vs measured</h2><p class="sub">Dotted: our continuous forecast. Solid underneath: days Predico confirmed as submitted. ${unit} · times in UTC</p></div>
+        <div class="card-head"><div><h2>Forecast vs measured</h2><p class="sub">Solid: what Predico registered as our submission. Dotted on top: our continuous forecast. ${unit} · times in UTC</p></div>
         <div class="controls">${seg("lv-r", [["7", "7 days"], ["30", "30 days"], ["all", "All"]], "7")}</div></div>
         <div class="chart" id="lv-chart"></div>
         <div class="foot"><div class="legend" id="lv-legend">
-          <button data-s="5" aria-pressed="true"><span class="sw" style="border-color:var(--obs)"></span>Observed (ESIOS)</button>
-          <button data-s="3" aria-pressed="true"><span class="sw" style="border-color:var(--sub)"></span>Submitted forecast</button>
+          <button data-s="6" aria-pressed="true"><span class="sw" style="border-color:var(--obs)"></span>Observed (ESIOS)</button>
+          <button data-s="3" aria-pressed="true"><span class="sw thick" style="border-color:var(--sub)"></span>Submitted forecast</button>
           <button data-s="4" aria-pressed="true"><span class="sw dot" style="border-color:var(--cont)"></span>Continuous forecast</button>
           <button data-s="1,2" aria-pressed="true"><span class="sw box"></span>Interval (q10–q90)</button>
+          <button data-s="5" aria-pressed="false"><span class="sw dash" style="border-color:var(--base)"></span>Climatology baseline</button>
         </div><span class="hint">drag to zoom · double-click to reset · scores follow the view</span></div>
+      </div>
+      <div class="card"><div class="card-head"><div><h2>Scores against climatology</h2><p class="sub" id="lv-span"></p></div></div>
+        <div class="tablewrap" id="lv-sum"></div>
+        <p class="sub">Climatology is the slot climatology of the last 28 days, built from the same run's inputs. Ratio = our score ÷ climatology on the days both have; below 1 beats it. Coverage target is 80%. Lower is better for every other metric.</p>
       </div>
       <div class="grid2">
         <div class="card"><div class="card-head"><div><h2>Submission record</h2><p class="sub">One square per target day (Madrid). Click a day to show it in the chart.</p></div></div>
-          <div class="days" id="lv-days">${record.map(d => `<button class="day ${d.state}" data-k="${d.key}" title="${fmtDay(d.key)}: ${{ sub: "submitted", cont: "forecast sent, not confirmed by Predico", miss: "no forecast" }[d.state]}">${+d.key.slice(8)}</button>`).join("")}</div>
+          <div class="days" id="lv-days">${record.map(d => `<button class="day ${d.state}" data-k="${d.key}" title="${fmtDay(d.key)}: ${STATE[d.state]}">${+d.key.slice(8)}</button>`).join("")}</div>
           <div class="legend"><span class="chip static"><b class="good">■</b> submitted · ${counts.sub}</span><span class="chip static">⋯ not confirmed · ${counts.cont}</span><span class="chip static">▨ missed · ${counts.miss}</span></div>
         </div>
         <div class="card"><div class="card-head"><div><h2>Model and inputs</h2><p class="sub">Latest run ${esc(T.last_run.slice(0, 16).replace("T", " "))} UTC · ${T.runs} run${T.runs === 1 ? "" : "s"} published</p></div><span class="pill ${T.env === "production" ? "" : "warn"}">${esc(T.env)}</span></div>
@@ -244,11 +255,10 @@ async function renderLive(root) {
           <div class="chips">${(T.features.length ? T.features : ["(feature list arrives with the first published run)"]).map(f => `<span class="chip static">${esc(f)}</span>`).join("")}</div>
         </div>
       </div>
-      <div class="card"><div class="card-head"><div><h2>Daily scores</h2><p class="sub">Our forecast against the slot-climatology baseline computed from the same run's inputs. Lower is better.</p></div>
-        <div class="controls">${seg("lv-m", [["rmse", "RMSE"], ["winkler", "Winkler"], ["coverage", "Coverage"]], "rmse")}</div></div>
-        <div class="chart" id="lv-scores"></div></div>`;
+      <div class="card"><div class="card-head"><div><h2>Daily scores</h2><p class="sub">Every target day, newest first. Click a row to show it in the chart.</p></div></div>
+        <div class="tablewrap" style="max-height:520px" id="lv-daily"></div></div>`;
 
-    const data = [x, T.q10, T.q90, sub, T.q50, T.obs];
+    const data = [x, e10, e90, s50, T.q50, T.b50, T.obs];
     const span = x[n - 1] - x[0];
     let range = "7";
     const setRange = r => {
@@ -256,6 +266,7 @@ async function renderLive(root) {
       const max = x[n - 1] + STEP, min = r === "all" ? x[0] : Math.max(x[0], max - +r * 86400);
       main.inst.setScale("x", { min, max });
     };
+    const shown = [true, true, true, true, true, false, true];
     const main = mount(root.querySelector("#lv-chart"), (w, h) => new uPlot({
       width: w, height: h, tzDate: tzUTC, legend: { show: false },
       scales: { x: { time: true } },
@@ -263,19 +274,21 @@ async function renderLive(root) {
       series: [{},
         { stroke: css("--accent"), width: 1, dash: [2, 3], points: { show: false } },
         { stroke: css("--accent"), width: 1, dash: [2, 3], points: { show: false } },
-        line("Submitted", css("--sub"), { width: 3 }),
-        line("Continuous", css("--cont"), { width: 2, dash: [1, 4], cap: "round" }),
+        line("Submitted", css("--sub"), { width: 6 }),
+        line("Continuous", css("--cont"), { width: 2, dash: [2, 4], cap: "round" }),
+        line("Climatology", css("--base"), { width: 1.5, dash: [6, 4] }),
         line("Observed", css("--obs"), { width: 2 }),
-      ],
+      ].map((s, i) => (i ? { ...s, show: shown[i] } : s)),
       bands: [{ series: [2, 1], fill: css("--band") }],
       axes: axes(`${LABEL[target]} (${unit})`),
-      hooks: { setScale: [(u, k) => k === "x" && scores(u.scales.x.min, u.scales.x.max)] },
+      hooks: { setScale: [(u, k) => k === "x" && summary(u.scales.x.min, u.scales.x.max)] },
       plugins: [nowMarker(Date.now() / 1000), tooltip((u, i) => {
-        const rows = [];
-        if (u.series[5].show && T.obs[i] != null) rows.push([css("--obs"), "Observed", `${f1(T.obs[i])} ${unit}`]);
-        if (u.series[3].show && sub[i] != null) rows.push([css("--sub"), "Submitted", `${f1(sub[i])} ${unit}`]);
-        if (u.series[4].show && T.q50[i] != null && sub[i] == null) rows.push([css("--cont"), "Continuous", `${f1(T.q50[i])} ${unit}`, true]);
-        if (u.series[1].show && T.q10[i] != null) rows.push([css("--accent"), "q10–q90", `${f1(T.q10[i])} … ${f1(T.q90[i])}`]);
+        const rows = [], on = k => u.series[k].show;
+        if (on(6) && T.obs[i] != null) rows.push([css("--obs"), "Observed", `${f1(T.obs[i])} ${unit}`]);
+        if (on(3) && s50[i] != null) rows.push([css("--sub"), "Submitted", `${f1(s50[i])} ${unit}`]);
+        if (on(4) && T.q50[i] != null) rows.push([css("--cont"), "Continuous", `${f1(T.q50[i])} ${unit}`, true]);
+        if (on(1) && e10[i] != null) rows.push([css("--accent"), "q10–q90", `${f1(e10[i])} … ${f1(e90[i])}`]);
+        if (on(5) && T.b50[i] != null) rows.push([css("--base"), "Climatology", `${f1(T.b50[i])} ${unit}`]);
         return rows.length ? ttHTML(fmtUTC(x[i]), rows) : null;
       })],
     }, data, root.querySelector("#lv-chart")), chartHeight);
@@ -286,39 +299,40 @@ async function renderLive(root) {
       const b = e.target.closest("button"); if (!b) return;
       const on = b.getAttribute("aria-pressed") !== "true";
       b.setAttribute("aria-pressed", String(on));
-      b.dataset.s.split(",").forEach(i => main.inst.setSeries(+i, { show: on }));
+      b.dataset.s.split(",").forEach(i => { shown[+i] = on; main.inst.setSeries(+i, { show: on }); });
     });
-    root.querySelector("#lv-days").addEventListener("click", e => {
-      const b = e.target.closest("button"); if (!b) return;
-      const d = dayInfo.get(b.dataset.k);
-      main.inst.setScale("x", { min: x[d.i0], max: x[d.i1] + STEP });
-    });
+    const zoomDay = k => { const d = dayInfo.get(k); main.inst.setScale("x", { min: x[d.i0], max: x[d.i1] + STEP }); };
+    root.querySelector("#lv-days").addEventListener("click", e => { const b = e.target.closest("button"); if (b) zoomDay(b.dataset.k); });
 
-    function scores(lo, hi) {
-      const inView = model.filter(d => d.t >= lo - 3600 && d.t < hi);
-      const rel = m => { const p = inView.filter(d => base.has(d.key)); return p.length ? mean(p.map(d => d[m])) / mean(p.map(d => base.get(d.key)[m])) : null; };
-      const r1 = rel("rmse"), r2 = rel("winkler"), cov = mean(inView.map(d => d.coverage));
-      root.querySelector("#lv-kpis").innerHTML =
-        kpi("Days submitted", `${counts.sub}<span class="muted" style="font-size:14px"> / ${record.length}</span>`, counts.miss ? `${counts.miss} missed, ${counts.cont} not confirmed` : `${counts.cont} not confirmed`) +
-        kpi("RMSE (q50)", f1(mean(inView.map(d => d.rmse))), relText(r1), relClass(r1)) +
-        kpi("Winkler (q10–q90)", f1(mean(inView.map(d => d.winkler))), relText(r2), relClass(r2)) +
-        kpi("Coverage", pct(cov), cov == null ? "" : Math.abs(cov - 0.8) <= 0.05 ? "close to the 80% target" : cov < 0.8 ? "too narrow (target 80%)" : "too wide (target 80%)", cov == null ? "" : Math.abs(cov - 0.8) <= 0.05 ? "good" : "warn") +
-        kpi("Scored days in view", String(inView.length), inView.length ? `${fmtDay(inView[0].key)} – ${fmtDay(inView[inView.length - 1].key)}` : "no measured days in view");
+    // Summary table: the days in the chart's view; ratios only on days with a baseline.
+    const METRICS = [["rmse", "RMSE (q50)", f1, unit], ["mae", "MAE (q50)", f1, unit], ["winkler", "Winkler (q10–q90)", f1, unit], ["coverage", "Coverage (q10–q90)", pct, "target 80%"]];
+    const covClass = c => (c == null ? "" : Math.abs(c - 0.8) <= 0.05 ? "good" : "warn");
+    function summary(lo, hi) {
+      const inView = model.filter(d => d.t >= lo - 3600 && d.t < hi), both = inView.filter(d => base.has(d.key));
+      root.querySelector("#lv-span").textContent = inView.length
+        ? `${inView.length} scored day${inView.length === 1 ? "" : "s"} in view: ${fmtDay(inView[0].key)} – ${fmtDay(inView[inView.length - 1].key)}`
+        : "No measured days in view yet.";
+      root.querySelector("#lv-sum").innerHTML = `<table><thead><tr><th>Metric</th><th class="n">Our forecast</th><th class="n">Climatology</th><th class="n">Ratio</th><th>Unit</th></tr></thead><tbody>${METRICS.map(([m, label, f, u]) => {
+        const ours = mean(inView.map(d => d[m])), clim = mean(both.map(d => base.get(d.key)[m]));
+        const r = m === "coverage" || !both.length ? null : mean(both.map(d => d[m])) / clim;
+        return `<tr><td>${label}</td><td class="n ${m === "coverage" ? covClass(ours) : ""}"><b>${f(ours)}</b></td><td class="n muted">${f(clim)}</td><td class="n ${relClass(r)}">${r == null ? "–" : f3(r)}</td><td class="muted">${u}</td></tr>`;
+      }).join("")}</tbody></table>`;
     }
-    scores(main.inst.scales.x.min, main.inst.scales.x.max);
+    summary(main.inst.scales.x.min, main.inst.scales.x.max);
 
-    let metric = "rmse";
-    const sc = mount(root.querySelector("#lv-scores"), (w, h) => {
-      const xs = model.map(d => d.t), a = model.map(d => d[metric]), b = model.map(d => base.get(d.key)?.[metric] ?? null);
-      return new uPlot({
-        width: w, height: h, tzDate: tzUTC, legend: { show: false }, scales: { x: { time: true } },
-        cursor: { points: { size: 7, width: 2, fill: css("--surface") } },
-        series: [{}, line("Our forecast", css("--sub"), { width: 2.5, points: { show: true, size: 6 } }), line("Baseline", css("--ink-soft"), { width: 1.5, dash: [6, 4], points: { show: true, size: 4 } })],
-        axes: axes(metric === "coverage" ? "Coverage" : `${metric === "rmse" ? "RMSE" : "Winkler"} (${unit})`, (u, s) => s.map(v => { const d = new Date(v * 1000); return `${d.getUTCDate()} ${MON[d.getUTCMonth()]}`; })),
-        plugins: [tooltip((u, i) => ttHTML(fmtDay(model[i].key), [[css("--sub"), "Our forecast", metric === "coverage" ? pct(a[i]) : f1(a[i])], [css("--ink-soft"), "Baseline", metric === "coverage" ? pct(b[i]) : f1(b[i])]]))],
-      }, [xs, a, b], root.querySelector("#lv-scores"));
-    }, 240);
-    onSeg(root, "lv-m", v => { metric = v; sc.inst.destroy(); sc.inst = sc.build(); });
+    // Daily table, newest first; days without measurements still show their status.
+    const scoredDay = new Map(model.map(d => [d.key, d]));
+    const cell = (d, b, m, f) => {
+      const v = d?.[m], c = b?.[m], r = m === "coverage" || v == null || c == null ? null : v / c;
+      return `<td class="n ${m === "coverage" ? covClass(v) : ""}">${f(v)}</td><td class="n muted">${f(c)}</td>${m === "coverage" ? "" : `<td class="n ${relClass(r)}">${r == null ? "–" : f3(r)}</td>`}`;
+    };
+    root.querySelector("#lv-daily").innerHTML = `<table><thead>
+      <tr><th rowspan="2">Day</th><th rowspan="2">Status</th><th class="n" colspan="3">RMSE (${unit})</th><th class="n" colspan="3">MAE (${unit})</th><th class="n" colspan="3">Winkler (${unit})</th><th class="n" colspan="2">Coverage</th></tr>
+      <tr>${["ours", "clim.", "ratio", "ours", "clim.", "ratio", "ours", "clim.", "ratio", "ours", "clim."].map(h => `<th class="n">${h}</th>`).join("")}</tr></thead><tbody>${[...record].reverse().map(r => {
+        const d = scoredDay.get(r.key), b = base.get(r.key);
+        return `<tr class="click" data-k="${r.key}"><td class="mono">${fmtDay(r.key)}</td><td><span class="pill ${r.state === "sub" ? "" : r.state === "cont" ? "warn" : "muted"}">${STATE[r.state]}</span></td>${d ? cell(d, b, "rmse", f1) + cell(d, b, "mae", f1) + cell(d, b, "winkler", f1) + cell(d, b, "coverage", pct) : `<td class="muted" colspan="11">${r.state === "miss" ? "no forecast" : "awaiting measurements"}</td>`}</tr>`;
+      }).join("")}</tbody></table>`;
+    root.querySelector("#lv-daily").addEventListener("click", e => { const tr = e.target.closest("tr[data-k]"); if (tr) zoomDay(tr.dataset.k); });
   }
 }
 

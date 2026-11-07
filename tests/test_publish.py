@@ -22,3 +22,11 @@ def test_scored_takes_latest_run_before_each_gate_and_hides_open_days():
     assert (out.q50[day == "11-04"] == 1).all()  # the 16:30 run missed the gate
     assert (out.q50[day == "11-05"] == 3).all()  # latest run before the Nov 5 gate
     assert set(day) == {"11-04", "11-05"}  # Nov 6 stays private until its gate
+
+
+def test_gate_closes_is_d_minus_1_at_gate_local():
+    from openpredico.live.publish import gate_closes
+
+    idx = pd.DatetimeIndex(["2026-11-06 23:00", "2026-11-07 22:45"], tz="UTC")  # Nov 7 Madrid
+    closes = gate_closes(idx, TZ, "17:00")
+    assert (closes == pd.Timestamp("2026-11-06 17:00", tz=TZ)).all()

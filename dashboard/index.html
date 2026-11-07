@@ -12,7 +12,7 @@
 :root {
   --surface: #ffffff; --bg: #f6f8f8; --ink: #0d0d0d; --ink-soft: #5a5f66; --line: #e6e8eb; --grid: #eff1f3;
   --accent: #53cdcd; --accent-ink: #0e7d7e; --accent-wash: rgba(83, 205, 205, 0.14);
-  --band: rgba(83, 205, 205, 0.2); --cont: #53cdcd; --sub: #0e7d7e; --obs: #0d0d0d;
+  --band: rgba(83, 205, 205, 0.2); --cont: #0e7d7e; --sub: rgba(83, 205, 205, 0.55); --obs: #0d0d0d; --base: #b7791f;
   --good: #0e7d7e; --bad: #c2456b; --warn: #b7791f; --future: rgba(13, 13, 13, 0.035);
   --gold: #d9b13b; --silver: #a7b0b8; --bronze: #c0844f;
   --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -22,14 +22,14 @@
   :root:not([data-theme="light"]) {
     --surface: #131617; --bg: #0b0d0e; --ink: #eef1f2; --ink-soft: #9aa1a8; --line: #252a2e; --grid: #1b1f22;
     --accent: #53cdcd; --accent-ink: #6fd8d8; --accent-wash: rgba(83, 205, 205, 0.12);
-    --band: rgba(83, 205, 205, 0.18); --cont: #9fe8e8; --sub: #53cdcd; --obs: #f3f5f6;
+    --band: rgba(83, 205, 205, 0.18); --cont: #9fe8e8; --sub: rgba(83, 205, 205, 0.45); --obs: #f3f5f6; --base: #e0a447;
     --good: #53cdcd; --bad: #ef7a9c; --warn: #e3a64a; --future: rgba(255, 255, 255, 0.035); color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --surface: #131617; --bg: #0b0d0e; --ink: #eef1f2; --ink-soft: #9aa1a8; --line: #252a2e; --grid: #1b1f22;
   --accent: #53cdcd; --accent-ink: #6fd8d8; --accent-wash: rgba(83, 205, 205, 0.12);
-  --band: rgba(83, 205, 205, 0.18); --cont: #9fe8e8; --sub: #53cdcd; --obs: #f3f5f6;
+  --band: rgba(83, 205, 205, 0.18); --cont: #9fe8e8; --sub: rgba(83, 205, 205, 0.45); --obs: #f3f5f6; --base: #e0a447;
   --good: #53cdcd; --bad: #ef7a9c; --warn: #e3a64a; --future: rgba(255, 255, 255, 0.035); color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -91,6 +91,8 @@ label.tog { display: inline-flex; gap: 6px; align-items: center; font-size: 13px
 .legend button[aria-pressed="false"] { opacity: 0.38; }
 .sw { width: 22px; height: 0; border-top: 2.5px solid; display: inline-block; }
 .sw.dot { border-top-style: dotted; border-top-width: 3px; }
+.sw.thick { border-top-width: 6px; }
+.sw.dash { border-top-style: dashed; border-top-width: 2px; }
 .sw.box { height: 11px; border: 1px solid var(--accent); border-radius: 3px; background: var(--band); }
 .foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; align-items: center; }
 .hint { font: 12px var(--mono); color: var(--ink-soft); }
@@ -101,6 +103,7 @@ th { font-weight: 500; color: var(--ink-soft); font-size: 12px; background: var(
 td.n, th.n { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 tr:last-child td { border-bottom: 0; }
 tr.live td { background: var(--accent-wash); }
+tr.click { cursor: pointer; } tr.click:hover td { background: var(--accent-wash); }
 .medal { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; font: 600 11px var(--mono); color: #0d0d0d; }
 tr.m1 .medal { background: var(--gold); } tr.m2 .medal { background: var(--silver); } tr.m3 .medal { background: var(--bronze); }
 tr.m1 td { box-shadow: inset 0 0 0 9999px color-mix(in srgb, var(--gold) 9%, transparent); }
@@ -118,7 +121,7 @@ tr.m3 td { box-shadow: inset 0 0 0 9999px color-mix(in srgb, var(--bronze) 9%, t
 td.desc { min-width: 280px; color: var(--ink-soft); }
 .days { display: grid; grid-template-columns: repeat(auto-fill, minmax(26px, 1fr)); gap: 4px; }
 .day { aspect-ratio: 1; max-width: 100%; border-radius: 5px; border: 1px solid var(--line); background: var(--grid); cursor: pointer; padding: 0; font: 10px var(--mono); color: var(--ink-soft); }
-.day.sub { background: var(--sub); border-color: var(--sub); color: var(--surface); }
+.day.sub { background: var(--sub); border-color: var(--sub); color: var(--ink); }
 .day.cont { background: var(--surface); border: 2px dotted var(--cont); color: var(--ink); }
 .day.miss { background: repeating-linear-gradient(45deg, var(--grid) 0 3px, var(--surface) 3px 6px); }
 .heat { display: grid; grid-template-columns: 64px repeat(31, minmax(10px, 1fr)); gap: 2px; font: 10px var(--mono); color: var(--ink-soft); min-width: 520px; }
