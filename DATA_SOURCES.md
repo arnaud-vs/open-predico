@@ -47,30 +47,10 @@ assert frame.index.to_series().diff().dropna().eq(pd.Timedelta("15min")).all()
 print(frame.shape, str(frame.index.tz), frame.isna().sum().to_dict())
 ```
 
-### Independent daily collection (prepared, requires deployment)
+### Daily snapshots
 
-`examples/fiftyhertz_modal.py` defines a separate Modal app and persistent volume,
-`xiaoyujin97-fiftyhertz-inputs`. Schedule: **13:30 Europe/Berlin daily**, following
-local DST. This leaves 90 minutes before the documented German 15:00 gate.
-This timing is for German day-ahead forecasts, not Belgian solar's earlier gate.
-
-It fetches today plus seven prior local days, writes timestamped Parquet snapshots
-and metadata (freshness, missing values, gaps), and retains revisions. No forecasts,
-HF uploads, Predico calls or colleague's secrets/apps are involved. Modal retries
-failed runs twice. Historical backfill and weather are separate future steps.
-An empty/incomplete response must never be silently replaced with zeros.
-
-To activate from the repo root in an authenticated Modal account:
-
-```sh
-python -m pip install modal
-modal setup
-PYTHONPATH=src modal run examples/fiftyhertz_modal.py::collect_daily
-PYTHONPATH=src modal deploy examples/fiftyhertz_modal.py
-```
-
-First verify the manual run's metadata, saved snapshot and `latest.json` in the
-new volume. After deployment, verify the scheduled 13:30 run in Modal logs and
-enable failure notifications there. This schedule is not active merely by pushing
-this branch. A GitHub cron added only on this development branch would not run:
-GitHub scheduled workflows run from the default branch.
+No separate collector: the live run (`live/submit.py`, on Modal) fetches the 50Hertz
+actuals it needs and stores its exact inputs, as known at run time, in the HF dataset
+`open-predico/live-private` (`inputs/<target>/<run>.parquet`). That is the revision
+record; missing values stay NaN, never zeros. Observed publication lag of the actuals:
+~25 min (2026-11-07), inside the 2 h `PUBLICATION_LAG` the backtest assumes.
