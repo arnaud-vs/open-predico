@@ -151,6 +151,22 @@ def live_frames(demo: bool) -> tuple[dict[str, pd.DataFrame], pd.DataFrame | Non
     return frames, pd.DataFrame(rows)
 
 
+def official(target: str, demo: bool, days: list[str]) -> list[dict]:
+    """Predico's scores of our submissions (our rank only), as records; [] before the first."""
+    if demo:  # local preview only: made-up ranks on the demo days, never uploaded
+        rng = np.random.default_rng(0)
+        return [
+            {"day": d, "variable": v, "metric": m, "value": float(rng.uniform(50, 300)),
+             "rank": int(rng.integers(1, 9)), "participants": 8}
+            for d in days for v, m in (("q50", "rmse"), ("q10", "pinball"), ("q90", "pinball"))
+        ]  # fmt: skip
+    try:
+        df = download("live", f"scores/{target}.parquet")
+    except Exception:  # not published yet
+        return []
+    return json.loads(df.round(3).to_json(orient="records"))
+
+
 def live(out: Path, demo: bool) -> None:
     frames, runs = live_frames(demo)
     if runs is None:
@@ -171,6 +187,11 @@ def live(out: Path, demo: bool) -> None:
             "runs": len(target_runs),
             "last_run": str(last.run),
             "features": [f for f in str(last.features).split(",") if f],
+            "official": official(
+                last.target,
+                demo,
+                sorted(set(df.index.tz_convert("Europe/Madrid").strftime("%Y-%m-%d")))[:-1],
+            ),
         }
     write(out, "live.json", data)
 

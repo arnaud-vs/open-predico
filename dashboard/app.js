@@ -245,6 +245,8 @@ async function renderLive(root) {
         <div class="tablewrap" id="lv-sum"></div>
         <p class="sub">Climatology is the slot climatology of the last 28 days, built from the same run's inputs. Ratio = our score ÷ climatology on the days both have; below 1 beats it. Coverage target is 80%. Lower is better for every other metric.</p>
       </div>
+      <div class="card"><div class="card-head"><div><h2>Predico's official scores</h2><p class="sub">How Predico scored our submissions and where we ranked among all forecasters on that challenge. Only our own results are shown.</p></div></div>
+        <div id="lv-off"></div></div>
       <div class="grid2">
         <div class="card"><div class="card-head"><div><h2>Submission record</h2><p class="sub">One square per target day (Madrid). Click a day to show it in the chart.</p></div></div>
           <div class="days" id="lv-days">${record.map(d => `<button class="day ${d.state}" data-k="${d.key}" title="${fmtDay(d.key)}: ${STATE[d.state]}">${+d.key.slice(8)}</button>`).join("")}</div>
@@ -319,6 +321,20 @@ async function renderLive(root) {
       }).join("")}</tbody></table>`;
     }
     summary(main.inst.scales.x.min, main.inst.scales.x.max);
+
+    // Official scores: one column per variable and metric, value with our rank among N.
+    const off = T.official ?? [], offEl = root.querySelector("#lv-off");
+    if (!off.length) offEl.innerHTML = `<p class="empty">No official scores yet. Predico scores a day once its measurements are in, usually a day or two after delivery.</p>`;
+    else {
+      const cols = [...new Set(off.map(r => `${r.variable} ${r.metric}`))].sort();
+      const byDay = new Map();
+      for (const r of off) (byDay.get(r.day) ?? byDay.set(r.day, {}).get(r.day))[`${r.variable} ${r.metric}`] = r;
+      const days = [...byDay.keys()].sort().reverse();
+      const rankCell = r => (r ? `<td class="n ${r.rank <= 3 ? `m${r.rank}` : ""}">${f1(r.value)} <span class="muted">·</span> ${r.rank <= 3 ? `<span class="medal">${r.rank}</span>` : r.rank}<span class="muted">/${r.participants}</span></td>` : `<td class="n muted">–</td>`);
+      const latest = byDay.get(days[0]);
+      offEl.innerHTML = `<div class="kpis">${cols.map(c => { const r = latest[c]; return kpi(`${c} · ${fmtDay(days[0])}`, r ? `${r.rank}<span class="muted" style="font-size:14px"> / ${r.participants}</span>` : "–", r ? `score ${f1(r.value)}` : ""); }).join("")}</div>
+        <div class="tablewrap" style="max-height:420px"><table><thead><tr><th>Day</th>${cols.map(c => `<th class="n">${esc(c)} <span class="muted">· rank</span></th>`).join("")}</tr></thead><tbody>${days.map(d => `<tr><td class="mono">${fmtDay(d)}</td>${cols.map(c => rankCell(byDay.get(d)[c])).join("")}</tr>`).join("")}</tbody></table></div>`;
+    }
 
     // Daily table, newest first; days without measurements still show their status.
     const scoredDay = new Map(model.map(d => [d.key, d]));

@@ -8,6 +8,8 @@ dashboard shows them as missed). Rebuilt from `live-private` on every run, so it
                                 at the gate; s10/s50/s90: what Predico registered as our session
                                 submissions (also days from before the HF record); obs; b10/b50/b90
                                 (slot climatology from the same run's inputs, the baseline)
+    scores/<target>.parquet     Predico's official scores of our submissions per day, variable
+                                and metric, with our rank and the number of participants
     runs.parquet                one row per run and target: model and input features
 
 Usage: python -m openpredico.live.publish
@@ -69,7 +71,8 @@ def main() -> None:
                 }
             )
         out = scored(runs, t["timezone"], t["gate"], now) if runs else pd.DataFrame()
-        sub = client.submitted_forecasts(t["predico_resource"])
+        challenges = client.our_challenges(t["predico_resource"])
+        sub = client.submitted_forecasts(challenges)
         sub = sub[gate_closes(sub.index, t["timezone"], t["gate"]) <= now]  # never an open day
         sub = sub.rename(columns=lambda c: "s" + c[1:])  # q50 -> s50
         out = sub if out.empty else out.join(sub, how="outer")
@@ -84,6 +87,8 @@ def main() -> None:
             obs[known] = obs[known].fillna(0)  # missing quarter-hour = no activation (PLAN.md)
         out["obs"] = obs
         hf.upload(out, "live", f"forecasts/{name}.parquet", f"Publish {name} {now:%Y-%m-%d}")
+        # Our own official scores and rank only; never other forecasters' results.
+        hf.upload(client.scores(challenges), "live", f"scores/{name}.parquet", f"Scores {name}")
         run_rows += rows
         days = out.index.tz_convert(t["timezone"]).normalize()
         print(f"{name}: {days.nunique()} days, {days[out.s50.notna()].nunique()} registered")

@@ -63,23 +63,53 @@ class Predico:
         """Per-challenge readiness before the gate (`ready`, `source`)."""
         return self._get("market/session/coverage")
 
-    def submitted_forecasts(self, resource_name: str) -> pd.DataFrame:
-        """What Predico registered as our session submissions: q10/q50/q90 on a UTC index."""
+    def our_challenges(self, resource_name: str) -> list[dict]:
+        """Challenges of the resource for which Predico registered a session submission of ours."""
         subs = {
             s["market_session_challenge"] for s in self._get("market/challenge/submission")["data"]
         }
-        # ponytail: refetches every challenge ever (one request each); add a date cursor if slow
+        # ponytail: lists every challenge ever and callers fetch each; add a date cursor if slow
+        challenges = self._get("market/challenge", resource_name=resource_name)["data"]
+        return [c for c in challenges if c["id"] in subs]
+
+    def submitted_forecasts(self, challenges: list[dict]) -> pd.DataFrame:
+        """What Predico registered as our session submissions: q10/q50/q90 on a UTC index."""
         rows = []
-        for c in self._get("market/challenge", resource_name=resource_name)["data"]:
-            if c["id"] in subs:
-                path = "market/challenge/submission/forecasts"
-                rows += self._get(path, challenge=c["id"])["data"]
+        for c in challenges:
+            rows += self._get("market/challenge/submission/forecasts", challenge=c["id"])["data"]
         if not rows:
             return pd.DataFrame(columns=list(QUANTILES), index=pd.DatetimeIndex([], tz="UTC"))
         df = pd.DataFrame(rows).assign(datetime=lambda d: pd.to_datetime(d.datetime, utc=True))
         df = df.sort_values("registered_at")  # a resubmission replaces the earlier one
         wide = df.pivot_table("value", "datetime", "variable", aggfunc="last")
         return wide.reindex(columns=list(QUANTILES)).rename_axis(index=None, columns=None)
+
+    def scores(self, challenges: list[dict]) -> pd.DataFrame:
+        """Predico's official scores of our submissions, with our rank among N participants.
+
+        Only `personal_metrics`: other forecasters' results (`general_metrics`) are never kept.
+        Challenges not evaluated yet return no rows.
+        """
+        rows = []
+        for c in challenges:
+            try:
+                data = self._get("market/challenge/submission-scores", challenge=c["id"])["data"]
+            except requests.HTTPError:
+                continue  # not evaluated yet
+            for m in data.get("personal_metrics", []) if isinstance(data, dict) else []:
+                rows.append(
+                    {
+                        "day": str(c["target_day"])[:10],
+                        "variable": m["variable"],
+                        "metric": m["metric"],
+                        "value": m["value"],
+                        "rank": m["rank"],
+                        "participants": m["total_participants"],
+                    }
+                )
+        return pd.DataFrame(
+            rows, columns=["day", "variable", "metric", "value", "rank", "participants"]
+        )
 
     def open_challenges(self, resource_name: str) -> list[dict]:
         return self._get("market/challenge", open_only="true", resource_name=resource_name)["data"]

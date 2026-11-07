@@ -105,7 +105,8 @@ tr:last-child td { border-bottom: 0; }
 tr.live td { background: var(--accent-wash); }
 tr.click { cursor: pointer; } tr.click:hover td { background: var(--accent-wash); }
 .medal { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; font: 600 11px var(--mono); color: #0d0d0d; }
-tr.m1 .medal { background: var(--gold); } tr.m2 .medal { background: var(--silver); } tr.m3 .medal { background: var(--bronze); }
+tr.m1 .medal, td.m1 .medal { background: var(--gold); } tr.m2 .medal, td.m2 .medal { background: var(--silver); } tr.m3 .medal, td.m3 .medal { background: var(--bronze); }
+td.m1 .medal, td.m2 .medal, td.m3 .medal { width: 18px; height: 18px; font-size: 10px; }
 tr.m1 td { box-shadow: inset 0 0 0 9999px color-mix(in srgb, var(--gold) 9%, transparent); }
 tr.m2 td { box-shadow: inset 0 0 0 9999px color-mix(in srgb, var(--silver) 10%, transparent); }
 tr.m3 td { box-shadow: inset 0 0 0 9999px color-mix(in srgb, var(--bronze) 9%, transparent); }
