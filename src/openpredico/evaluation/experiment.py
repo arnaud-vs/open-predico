@@ -1,14 +1,15 @@
-"""Backtest a TSFM with covariates on the published features (`open-predico/benchmark`, v1).
+"""Backtest a TSFM with covariates on the published features (`open-predico/benchmark`).
 
 Every column of the target's `groups` (targets.toml) is used: `availability` in groups.toml
 splits known-future from past columns, the target is the first column and the other columns of
 its group (e.g. the other Spain target) are past covariates. Predictions (with the
 truth as `obs`) go to `<out>/<config>/<target>.parquet`, ready for `evaluation.results`.
 `drop` leaves out comma-separated columns (ablation); `drop=all` keeps only the target history
-(univariate: no past, known-future or calendar covariates).
+(univariate: no past, known-future or calendar covariates). `targets` limits the run to
+comma-separated targets. Repo `slot_climatology` runs that baseline over `context days`.
 
     python -m openpredico.evaluation.experiment <config> <repo> <context days> <out dir> \
-        [<device>] [<drop>] [<origin HH:MM, local; default from targets.toml>]
+        [<device>] [<drop>] [<origin HH:MM, local; default from targets.toml>] [<targets>]
 """
 
 import importlib
@@ -17,11 +18,13 @@ import time
 from pathlib import Path
 
 import pandas as pd
+from huggingface_hub import HfApi
 
 from openpredico.config import load_targets
 from openpredico.data.groups import load_groups
-from openpredico.data.hf import download
+from openpredico.data.hf import ORG, download
 from openpredico.evaluation.backtest import backtest, clip
+from openpredico.models.baselines import slot_climatology
 
 TARGET_COLUMNS = {name: t["column"] for name, t in load_targets().items()}
 CATEGORICAL = ["qh_of_day", "weekday"]
@@ -35,13 +38,19 @@ ADAPTERS = {
 MAX_NAN = 0.9  # columns missing more than this share of the history are dropped
 
 
-# ponytail: groups added after v1 (not on HF yet); drop once v2 is published and chosen.
-NOT_IN_V1 = {"mfrr_bids", "target_50hertz", "calendar_de"}
+def load_benchmark(groups: set[str] | None = None) -> dict[str, pd.DataFrame]:
+    """`groups` (default all) from the latest version folder (`v1/`, `v2/`, ...) holding each.
 
-
-def load_v1(version: str = "v1") -> dict[str, pd.DataFrame]:
-    groups = [g for g in load_groups() if g not in NOT_IN_V1]
-    return {g: download("benchmark", f"{version}/{g}.parquet") for g in groups}
+    Versions only add groups (v2: the 50Hertz ones); unpublished groups (`mfrr_bids`) are absent.
+    """
+    groups, latest = groups or load_groups().keys(), {}
+    files = HfApi().list_repo_files(f"{ORG}/benchmark", repo_type="dataset")
+    for f in files:
+        version, _, name = f.partition("/")
+        group = name.removesuffix(".parquet")
+        if version[:1] == "v" and version[1:].isdigit() and group in groups:
+            latest[group] = max(latest.get(group, version), version, key=lambda v: int(v[1:]))
+    return {g: download("benchmark", f"{v}/{g}.parquet") for g, v in latest.items()}
 
 
 def features(
@@ -81,17 +90,26 @@ def run(
     device: str = "cpu",
     drop: str = "",
     origin: str = "",
+    targets: str = "",
 ) -> None:
-    frames = load_v1()
-    adapter = importlib.import_module(f"openpredico.models.tsfm.{ADAPTERS[repo.split('/')[0]]}")
-    model = adapter.load(repo, device)
+    frames = load_benchmark()
+    if repo != "slot_climatology":
+        adapter = importlib.import_module(f"openpredico.models.tsfm.{ADAPTERS[repo.split('/')[0]]}")
+        model = adapter.load(repo, device)
     for target, t in load_targets().items():
-        if NOT_IN_V1 & set(t["groups"]):
-            print(f"{target}: skipped, its groups are not in v1")
+        if targets and target not in targets.split(","):
+            continue
+        if missing := set(t["groups"]) - frames.keys():
+            print(f"{target}: skipped, groups not on HF: {sorted(missing)}")
             continue
         history, future = features(frames, target, drop)
         days = pd.date_range(*t["test_period"], tz=t["timezone"])
-        predict = adapter.make_predict(model, context_days, CATEGORICAL)
+        if repo == "slot_climatology":
+
+            def predict(past, future, days, tz=t["timezone"]):
+                return slot_climatology(past.iloc[:, 0], days, context_days, tz)
+        else:
+            predict = adapter.make_predict(model, context_days, CATEGORICAL)
         start = time.time()
         preds = clip(backtest(predict, history, days, origin or t["origin"], future), t)
         print(

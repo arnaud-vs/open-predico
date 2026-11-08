@@ -17,7 +17,7 @@ from huggingface_hub import HfApi
 from openpredico.config import load_targets
 from openpredico.data.groups import load_groups
 from openpredico.data.hf import ORG, download
-from openpredico.evaluation.experiment import NOT_IN_V1, TARGET_COLUMNS
+from openpredico.evaluation.experiment import TARGET_COLUMNS
 from openpredico.evaluation.metrics import daily_scores
 
 HERE = Path(__file__).parent
@@ -140,7 +140,7 @@ def live_frames(demo: bool) -> tuple[dict[str, pd.DataFrame], pd.DataFrame | Non
         fc["model"], fc["env"] = LIVE_CONFIG, "demo"
         fc.loc[day == sorted(set(day))[2], ["q10", "q50", "q90"]] = np.nan  # registered, no run
         frames[t] = fc
-        cols = [c for g, cs in load_groups().items() if g not in NOT_IN_V1 for c in cs]
+        cols = [c for g in load_targets()[target]["groups"] for c in load_groups()[g]]
         rows.append(
             {
                 "target": target,
