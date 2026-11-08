@@ -15,17 +15,27 @@ import pandas as pd
 from huggingface_hub import HfApi
 
 from openpredico.config import load_targets
+from openpredico.data.catalog import CALENDAR
 from openpredico.data.groups import load_groups
 from openpredico.data.hf import ORG, download
-from openpredico.evaluation.experiment import TARGET_COLUMNS
+from openpredico.evaluation.experiment import TARGET_COLUMNS, load_benchmark
 from openpredico.evaluation.metrics import daily_scores
 
 HERE = Path(__file__).parent
 PREFIX = "predictions/backtest/"
 BASELINE = "slot_climatology_28d"
 LIVE_CONFIG = "t0gamma_cov_ctx90"
-SHORT = {"spain_mfrr_energy": "energy", "spain_mfrr_price": "price"}
-UNITS = {"energy": "MWh", "price": "EUR/MWh"}
+# Dashboard markets (app.js MARKETS) and the short name of each target inside the page.
+MARKETS = {
+    "es-mfrr": {"spain_mfrr_energy": "energy", "spain_mfrr_price": "price"},
+    "de-wind": {"germany_wind_50hertz_ca": "wind"},
+    "de-solar": {"germany_solar_50hertz_ca": "solar"},
+}
+SHORT = {target: short for m in MARKETS.values() for target, short in m.items()}
+UNITS = {SHORT[name]: t["unit"] for name, t in load_targets().items()}
+# Input features tab outside Spain (Spain shows the ESIOS catalog): entsoe source descriptions.
+ENTSOE = {"A75": "actual generation", "A69": "day-ahead forecast", "A65": "day-ahead load forecast"}
+PSR = {"B16": "solar", "B18": "wind offshore", "B19": "wind onshore"}
 TYPES = {  # config name prefix -> model type; anything else is ML
     "slot_climatology": "baseline",
     "chronos": "foundation model",
@@ -53,7 +63,7 @@ def write(out: Path, name: str, obj) -> None:
     path.write_text(json.dumps(obj, separators=(",", ":")))
 
 
-def backtest(out: Path, tz: str) -> dict:
+def backtest(out: Path) -> dict:
     files = [
         f
         for f in HfApi().list_repo_files(f"{ORG}/benchmark", repo_type="dataset")
@@ -62,7 +72,7 @@ def backtest(out: Path, tz: str) -> dict:
     days, profiles, grid = {}, {}, None
     for f in sorted(files):
         config, target = f.removeprefix(PREFIX).removesuffix(".parquet").split("/")
-        t = SHORT[target]
+        t, tz = SHORT[target], load_targets()[target]["timezone"]
         df = download("benchmark", f)
         grid = df.index if grid is None else grid
         df = df.reindex(grid)
@@ -100,17 +110,45 @@ def backtest(out: Path, tz: str) -> dict:
 
 
 def target_series(out: Path) -> None:
-    df = download("benchmark", "v1/target.parquet").asfreq(STEP)
-    write(
-        out,
-        "target.json",
-        {"start": secs(df.index[0]), "energy": arr(df.mfrr_energy), "price": arr(df.mfrr_price)},
-    )
+    """Per market, its targets' truth from the benchmark: target/<market>.json."""
+    groups, targets = load_groups(), load_targets()
+    for market, shorts in MARKETS.items():
+        cols = {TARGET_COLUMNS[t]: s for t, s in shorts.items()}
+        need = {g for t in shorts for g in targets[t]["groups"] if TARGET_COLUMNS[t] in groups[g]}
+        df = pd.concat(load_benchmark(need).values(), axis=1)[list(cols)].asfreq(STEP)
+        series = {s: arr(df[c]) for c, s in cols.items()}
+        write(out, f"target/{market}.json", {"start": secs(df.index[0]), **series})
+
+
+def describe(source: str, names: dict) -> str:
+    prefix, key = source.split(":")
+    if prefix == "entsoe":
+        document, _, psrs = key.partition("_")
+        what = " + ".join(PSR[p] for p in psrs.split("+")) if psrs else "total"
+        return f"ENTSO-E {document} {ENTSOE[document]} ({what}), 50Hertz control area"
+    if prefix == "openmeteo":
+        area, variable = key.split(".")
+        return f"Open-Meteo {variable}, forecast 48 h ahead, mean over the {area} points"
+    if prefix == "calendar":
+        return CALENDAR[key]
+    return names.get((prefix, key), "")
 
 
 def catalog(out: Path) -> None:
+    """ESIOS catalog (Spain's tab) and, per market, its feature columns from groups.toml."""
     cat = download("benchmark", "catalog/inputs.parquet")
     write(out, "catalog.json", json.loads(cat.to_json(orient="records")))
+    names = {(r.source, str(r.id)): r.name for r in cat.itertuples()}
+    groups, targets = load_groups(), load_targets()
+    features = {
+        market: [
+            {"group": g, "column": c, **d, "description": describe(d["source"], names)}
+            for g in dict.fromkeys(g for t in shorts for g in targets[t]["groups"])
+            for c, d in groups[g].items()
+        ]
+        for market, shorts in MARKETS.items()
+    }
+    write(out, "features.json", features)
 
 
 def live_frames(demo: bool) -> tuple[dict[str, pd.DataFrame], pd.DataFrame | None]:
@@ -120,7 +158,6 @@ def live_frames(demo: bool) -> tuple[dict[str, pd.DataFrame], pd.DataFrame | Non
             runs = download("live", "runs.parquet")
         except Exception:  # dataset not published yet
             return {}, None
-        runs = runs[runs.target.isin(SHORT)]  # ponytail: Spain only until other tabs exist
         frames = {
             SHORT[t]: download("live", f"forecasts/{t}.parquet") for t in runs.target.unique()
         }
@@ -205,8 +242,7 @@ def main() -> None:
     a = p.parse_args()
     if a.upload and a.demo_live:
         raise SystemExit("--demo-live is for local previews; never upload it")
-    tz = load_targets()["spain_mfrr_energy"]["timezone"]
-    meta = backtest(a.out, tz)
+    meta = backtest(a.out)
     target_series(a.out)
     catalog(a.out)
     live(a.out, a.demo_live)
@@ -215,6 +251,7 @@ def main() -> None:
         "baseline": BASELINE,
         "live_config": LIVE_CONFIG,
         "units": UNITS,
+        "short": SHORT,
     }
     write(a.out, "meta.json", meta)
     if a.upload:

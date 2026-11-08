@@ -5,7 +5,7 @@ const DATA = "data/";
 const STEP = 900;
 const MON = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split(" ");
 const WEEKDAYS = "Mon Tue Wed Thu Fri Sat Sun".split(" ");
-const LABEL = { energy: "Energy", price: "Price" };
+const LABEL = { energy: "Energy", price: "Price", wind: "Wind", solar: "Solar" };
 const cache = {};
 const json = p =>
   (cache[p] ??= fetch(DATA + p).then(r => {
@@ -23,7 +23,8 @@ const mean = a => { let s = 0, n = 0; for (const v of a) if (v != null && !Numbe
 const fmtUTC = s => { const d = new Date(s * 1000); return `${d.getUTCDate()} ${MON[d.getUTCMonth()]} ${d.getUTCFullYear()}, ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`; };
 const fmtDay = key => { const [y, m, d] = key.split("-"); return `${+d} ${MON[+m - 1]} ${y}`; };
 
-// Madrid calendar for a UTC second, cached per hour (offsets are whole hours).
+// Madrid calendar for a UTC second, cached per hour (offsets are whole hours). Berlin shares
+// Madrid's offsets, so it serves the German markets too.
 const MAD = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Madrid", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hourCycle: "h23", weekday: "short" });
 const hourCache = new Map();
 function madrid(sec) {
@@ -145,12 +146,16 @@ function seg(id, options, value) {
 }
 function onSeg(root, id, fn) {
   const g = root.querySelector(`#${id}`);
-  g.addEventListener("click", e => {
+  g?.addEventListener("click", e => {
     const b = e.target.closest("button"); if (!b) return;
     g.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
     fn(b.dataset.v);
   });
 }
+// The selected market (MARKETS, below) and its targets' short names (build.py SHORT).
+const mk = () => MARKETS.find(m => m.id === market);
+const shortsOf = (m, meta) => m.resources.map(r => meta.short[r]);
+const targetSeg = (id, shorts, value) => (shorts.length > 1 ? seg(id, shorts.map(t => [t, LABEL[t]]), value) : "");
 const kpi = (k, v, d = "", cls = "") => `<div class="kpi"><span class="k">${esc(k)}</span><span class="v">${v}</span><span class="d ${cls}">${d}</span></div>`;
 const relClass = r => (r == null || Math.abs(r - 1) < 5e-4 ? "" : r < 1 ? "good" : "bad");
 const relText = r => (r == null ? "no baseline" : `${f3(r)} × baseline`);
@@ -186,19 +191,20 @@ function dailyScores(x, q10, q50, q90, obs) {
 // q*: our continuous forecast as it stood at the gate. s*: what Predico registered as our session
 // submission (the values it scores). b*: slot climatology from the same run's inputs.
 async function renderLive(root) {
-  const live = await json("live.json");
-  const head = `<div class="head"><div><h1>Live forecasts</h1><p class="lede">What we sent to Predico for Spain mFRR, published only after each gate (17:00 Madrid on D-1), next to the measured values from ESIOS.</p></div>`;
-  if (!live.available) {
+  const [live, meta] = await Promise.all([json("live.json"), json("meta.json")]);
+  const m = mk(), shorts = shortsOf(m, meta);
+  const head = `<div class="head"><div><h1>Live forecasts</h1><p class="lede">What we sent to Predico for ${esc(m.name)}, published only after each gate (${m.gateLocal}), next to the measured values from ${m.source}.</p></div>`;
+  if (!live.available || !shorts.some(s => live.targets[s])) {
     root.innerHTML = `${head}</div><div class="card"><p class="empty">No live forecasts are published yet. The first ones appear here half an hour after the next gate.</p></div>`;
     return;
   }
-  let target = "energy";
-  root.innerHTML = `${head}<div class="controls">${seg("lv-t", [["energy", "Energy"], ["price", "Price"]], target)}</div></div><div id="lv-body" style="display:grid;gap:18px"></div>`;
+  let target = shorts[0];
+  root.innerHTML = `${head}<div class="controls">${targetSeg("lv-t", shorts, target)}</div></div><div id="lv-body" style="display:grid;gap:18px"></div>`;
   onSeg(root, "lv-t", v => { target = v; draw(); });
   draw();
 
   function draw() {
-    const T = live.targets[target], unit = target === "energy" ? "MWh" : "EUR/MWh";
+    const T = live.targets[target], unit = meta.units[target];
     const n = T.q50.length, x = Array.from({ length: n }, (_, i) => T.start + i * STEP);
     const nul = () => new Array(n).fill(null);
     const [s10, s50, s90] = ["s10", "s50", "s90"].map(k => T[k] ?? nul());
@@ -234,7 +240,7 @@ async function renderLive(root) {
         <div class="controls">${seg("lv-r", [["7", "7 days"], ["30", "30 days"], ["all", "All"]], "7")}</div></div>
         <div class="chart" id="lv-chart"></div>
         <div class="foot"><div class="legend" id="lv-legend">
-          <button data-s="6" aria-pressed="true"><span class="sw" style="border-color:var(--obs)"></span>Observed (ESIOS)</button>
+          <button data-s="6" aria-pressed="true"><span class="sw" style="border-color:var(--obs)"></span>Observed (${m.source})</button>
           <button data-s="3" aria-pressed="true"><span class="sw thick" style="border-color:var(--sub)"></span>Submitted forecast</button>
           <button data-s="4" aria-pressed="true"><span class="sw dot" style="border-color:var(--cont)"></span>Continuous forecast</button>
           <button data-s="1,2" aria-pressed="true"><span class="sw box"></span>Interval (q10–q90)</button>
@@ -248,7 +254,7 @@ async function renderLive(root) {
       <div class="card"><div class="card-head"><div><h2>Predico's official scores</h2><p class="sub">How Predico scored our submissions and where we ranked among all forecasters on that challenge. Only our own results are shown.</p></div></div>
         <div id="lv-off"></div></div>
       <div class="grid2">
-        <div class="card"><div class="card-head"><div><h2>Submission record</h2><p class="sub">One square per target day (Madrid). Click a day to show it in the chart.</p></div></div>
+        <div class="card"><div class="card-head"><div><h2>Submission record</h2><p class="sub">One square per target day (${m.city}). Click a day to show it in the chart.</p></div></div>
           <div class="days" id="lv-days">${record.map(d => `<button class="day ${d.state}" data-k="${d.key}" title="${fmtDay(d.key)}: ${STATE[d.state]}">${+d.key.slice(8)}</button>`).join("")}</div>
           <div class="legend"><span class="chip static"><b class="good">■</b> submitted · ${counts.sub}</span><span class="chip static">⋯ not confirmed · ${counts.cont}</span><span class="chip static">▨ missed · ${counts.miss}</span></div>
         </div>
@@ -380,34 +386,40 @@ function leaderboard(days, baseline) {
 }
 
 async function renderBacktest(root) {
-  const [days, meta, prof] = await Promise.all([json("days.json"), json("meta.json"), json("profiles.json")]);
-  CONFIGS = meta.configs.map(c => c.name);
+  const [allDays, meta, prof] = await Promise.all([json("days.json"), json("meta.json"), json("profiles.json")]);
+  const m = mk(), targets = shortsOf(m, meta).filter(t => allDays[t]);
+  if (!targets.length) {
+    root.innerHTML = `<div class="head"><div><h1>Backtest</h1></div></div><div class="card"><p class="empty">No backtest of ${esc(m.name)} is published yet.</p></div>`;
+    return;
+  }
+  const days = Object.fromEntries(targets.map(t => [t, allDays[t]]));
+  CONFIGS = meta.configs.map(c => c.name).filter(c => targets.some(t => days[t].configs[c]));
   const type = Object.fromEntries(meta.configs.map(c => [c.name, c.type]));
-  const targets = Object.keys(days), lb = leaderboard(days, meta.baseline);
+  const lb = leaderboard(days, meta.baseline), t0 = targets[0];
   const top = lb.filter(r => r.config !== meta.live_config && r.config !== meta.baseline).slice(0, 2).map(r => r.config);
-  let sel = [meta.live_config, meta.baseline, ...top], types = new Set(), absolute = false;
+  let sel = [meta.live_config, meta.baseline, ...top].filter(c => CONFIGS.includes(c)), types = new Set(), absolute = false;
 
   root.innerHTML = `
-    <div class="head"><div><h1>Backtest</h1><p class="lede">Test year 1 Nov 2025 – 31 Oct 2026. Each forecast is made at 14:00 Madrid on D-1 from data published before then, and scored per local day as Predico does. <b>Lower is better.</b> Quarter-hours without truth (no mFRR activation, so no price) are left out.</p></div></div>
+    <div class="head"><div><h1>Backtest</h1><p class="lede">Test year 1 Nov 2025 – 31 Oct 2026. Each forecast is made at 14:00 ${m.city} on D-1 from data published before then, and scored per local day as Predico does. <b>Lower is better.</b> ${m.missingTruth}</p></div></div>
     <div class="card"><div class="card-head"><div><h2>Leaderboard</h2><p class="sub">Scores relative to <span class="mono">${esc(meta.baseline)}</span> (= 1.000) on the days both are scored. Highlighted: the live config.</p></div>
-      <div class="controls"><div class="chips" id="bt-types">${["baseline", "foundation model", "ML"].filter(t => meta.configs.some(c => c.type === t)).map(t => `<button class="chip" data-v="${t}" aria-pressed="false">${t}</button>`).join("")}</div>
+      <div class="controls"><div class="chips" id="bt-types">${["baseline", "foundation model", "ML"].filter(t => CONFIGS.some(c => type[c] === t)).map(t => `<button class="chip" data-v="${t}" aria-pressed="false">${t}</button>`).join("")}</div>
       <label class="tog"><input type="checkbox" id="bt-abs"> absolute scores</label></div></div>
       <div class="tablewrap" id="bt-lb"></div>
       <details><summary class="sub">How the scores work</summary><ul class="sub">
         <li><b>RMSE</b> (Predico's q50 score): √(mean (obs − q50)²) over a local day.</li>
         <li><b>Winkler</b> (Predico's q10/q90 score, α = 0.2): mean of (q90 − q10) + 10·max(0, q10 − obs) + 10·max(0, obs − q90). Rewards narrow intervals, penalises misses.</li>
         <li><b>Coverage</b>: share of quarter-hours inside [q10, q90]; a calibrated model gets 80%.</li>
-        <li><b>Score</b>: geometric mean of the four normalised values (RMSE and Winkler, both targets); rank sorts by it.</li></ul></details>
+        <li><b>Score</b>: geometric mean of the ${targets.length > 1 ? "four normalised values (RMSE and Winkler, both targets)" : "two normalised values (RMSE and Winkler)"}; rank sorts by it.</li></ul></details>
     </div>
     <div class="card"><div class="card-head"><div><h2>Configs in the charts below</h2><p class="sub">Same colour = same model family; dash = variant.</p></div></div><div class="chips" id="bt-sel"></div></div>
     <div class="card"><div class="card-head"><div><h2>Day viewer</h2><p class="sub">q50 per config, interval of the first selected config, truth in black. Times in UTC.</p></div>
-      <div class="controls">${seg("dv-t", targets.map(t => [t, LABEL[t]]), "energy")}<input type="date" id="dv-d" value="${days.energy.days.at(-1)}" min="${days.energy.days[0]}" max="${days.energy.days.at(-1)}"></div></div>
+      <div class="controls">${targetSeg("dv-t", targets, t0)}<input type="date" id="dv-d" value="${days[t0].days.at(-1)}" min="${days[t0].days[0]}" max="${days[t0].days.at(-1)}"></div></div>
       <p class="sub" id="dv-s"></p><div class="chart" id="dv-chart"></div></div>
-    <div class="card"><div class="card-head"><div><h2>By month</h2></div><div class="controls">${seg("mo-t", targets.map(t => [t, LABEL[t]]), "energy")}${seg("mo-m", [["rmse", "RMSE"], ["winkler", "Winkler"]], "rmse")}</div></div><div class="chart" id="mo-chart"></div></div>
-    <div class="card"><div class="card-head"><div><h2>Absolute error of q50 by hour and weekday</h2><p class="sub">Madrid time.</p></div><div class="controls">${seg("pr-t", targets.map(t => [t, LABEL[t]]), "energy")}</div></div>
+    <div class="card"><div class="card-head"><div><h2>By month</h2></div><div class="controls">${targetSeg("mo-t", targets, t0)}${seg("mo-m", [["rmse", "RMSE"], ["winkler", "Winkler"]], "rmse")}</div></div><div class="chart" id="mo-chart"></div></div>
+    <div class="card"><div class="card-head"><div><h2>Absolute error of q50 by hour and weekday</h2><p class="sub">${m.city} time.</p></div><div class="controls">${targetSeg("pr-t", targets, t0)}</div></div>
       <div class="grid2"><div class="chart" id="pr-h"></div><div class="chart" id="pr-w"></div></div></div>
     <div class="card"><div class="card-head"><div><h2>Win rate</h2><p class="sub">Cell (row A, column B): share of days scored for both where A has the lower score. Read across a row.</p></div>
-      <div class="controls">${seg("wr-t", targets.map(t => [t, LABEL[t]]), "energy")}${seg("wr-m", [["rmse", "RMSE"], ["winkler", "Winkler"]], "rmse")}</div></div>
+      <div class="controls">${targetSeg("wr-t", targets, t0)}${seg("wr-m", [["rmse", "RMSE"], ["winkler", "Winkler"]], "rmse")}</div></div>
       <div class="tablewrap" id="wr"></div></div>`;
 
   const lbEl = root.querySelector("#bt-lb");
@@ -439,7 +451,7 @@ async function renderBacktest(root) {
   const cfgSeries = c => { const st = configStyle(c); return line(c, st.color, { dash: st.dash, width: c === meta.live_config ? 2.5 : 1.75 }); };
 
   // By month
-  let moT = "energy", moM = "rmse";
+  let moT = t0, moM = "rmse";
   const months = t => [...new Set(days[t].days.map(d => d.slice(0, 7)))];
   const mo = mount(root.querySelector("#mo-chart"), (w, h) => {
     const ms = months(moT), x = ms.map((m, i) => i);
@@ -455,7 +467,7 @@ async function renderBacktest(root) {
   onSeg(root, "mo-m", v => { moM = v; rebuild(mo); });
 
   // Profiles
-  let prT = "energy";
+  let prT = t0;
   const prof1 = (el, key, labels) => mount(el, (w, h) => {
     const x = labels.map((_, i) => i);
     return new uPlot({ width: w, height: h, legend: { show: false }, scales: { x: { time: false } }, cursor: { points: { size: 6, width: 2, fill: css("--surface") } },
@@ -469,8 +481,8 @@ async function renderBacktest(root) {
   onSeg(root, "pr-t", v => { prT = v; rebuild(ph); rebuild(pw); });
 
   // Day viewer
-  let dvT = "energy";
-  const target = await json("target.json");
+  let dvT = t0;
+  const target = await json(`target/${market}.json`);
   const off = (meta.start - target.start) / STEP;
   const x = Array.from({ length: meta.n }, (_, i) => meta.start + i * STEP);
   const dayIdx = new Map();
@@ -502,7 +514,7 @@ async function renderBacktest(root) {
   function redrawSel() { rebuild(mo); rebuild(ph); rebuild(pw); drawDay(); drawWr(); }
 
   // Win rate
-  let wrT = "energy", wrM = "rmse";
+  let wrT = t0, wrM = "rmse";
   function drawWr() {
     const order = lb.map(r => r.config).filter(c => sel.includes(c));
     const d = days[wrT].configs;
@@ -523,21 +535,22 @@ function rebuild(c) { c.inst?.destroy(); c.inst = c.build(); }
 
 // --- Target data -------------------------------------------------------------------------
 async function renderTarget(root) {
-  const target = await json("target.json");
-  const n = target.energy.length, x = Array.from({ length: n }, (_, i) => target.start + i * STEP);
+  const [target, meta] = await Promise.all([json(`target/${market}.json`), json("meta.json")]);
+  const mkt = mk(), shorts = shortsOf(mkt, meta), scatter = "price" in target;
+  const n = target[shorts[0]].length, x = Array.from({ length: n }, (_, i) => target.start + i * STEP);
   const cal = x.map(madrid);
-  let t = "energy";
+  let t = shorts[0];
   root.innerHTML = `
-    <div class="head"><div><h1>Target data</h1><p class="lede">The truth series from <span class="mono">v1/target.parquet</span>: mFRR activated <b>energy</b> (net, MWh per quarter-hour, upward positive) and mFRR <b>price</b> (EUR/MWh), Spain, 15-min, ${fmtDay(cal[0].day)} – ${fmtDay(cal[n - 1].day)}. Missing energy is filled with 0 (no activation); missing price stays empty. No data during the Iberian blackout (28 Apr – 6 May 2025). Prices rise from Jul 2026 (monthly mean ~100 → ~157 EUR/MWh).</p></div>
-    <div class="controls">${seg("tg-t", [["energy", "Energy"], ["price", "Price"]], t)}</div></div>
+    <div class="head"><div><h1>Target data</h1><p class="lede">${mkt.about(fmtDay(cal[0].day), fmtDay(cal[n - 1].day))}</p></div>
+    <div class="controls">${targetSeg("tg-t", shorts, t)}</div></div>
     <div class="kpis" id="tg-k"></div>
     <div class="card"><div class="card-head"><div><h2>Time series</h2><p class="sub">Every quarter-hour of the history. Times in UTC.</p></div><div class="controls">${seg("tg-r", [["14", "14 days"], ["90", "90 days"], ["all", "All"]], "90")}</div></div>
       <div class="chart" id="tg-ts"></div><div class="foot"><span></span><span class="hint">drag to zoom · double-click to reset</span></div></div>
-    <div class="card"><div class="card-head"><div><h2>Typical patterns</h2><p class="sub">Mean (line) and q10–q90 (band) over the whole history, Madrid time.</p></div></div>
+    <div class="card"><div class="card-head"><div><h2>Typical patterns</h2><p class="sub">Mean (line) and q10–q90 (band) over the whole history, ${mkt.city} time.</p></div></div>
       <div class="grid3"><div class="chart" id="tg-p1"></div><div class="chart" id="tg-p2"></div><div class="chart" id="tg-p3"></div></div></div>
     <div class="grid2">
       <div class="card"><div class="card-head"><div><h2>Distribution</h2><p class="sub">Clipped to the 0.5–99.5% range for display.</p></div></div><div class="chart" id="tg-h"></div></div>
-      <div class="card"><div class="card-head"><div><h2>Price vs energy</h2><p class="sub">A random sample of 5,000 quarter-hours.</p></div></div><canvas class="scatter" id="tg-sc" role="img" aria-label="Scatter of mFRR price against net mFRR energy"></canvas></div>
+      ${scatter ? `<div class="card"><div class="card-head"><div><h2>Price vs energy</h2><p class="sub">A random sample of 5,000 quarter-hours.</p></div></div><canvas class="scatter" id="tg-sc" role="img" aria-label="Scatter of mFRR price against net mFRR energy"></canvas></div>` : ""}
     </div>
     <div class="card"><div class="card-head"><div><h2>Per day</h2><p class="sub" id="tg-ms"></p></div><div class="controls">${seg("tg-mk", [["miss", "Missing"], ["zero", "Exact zeros"]], "miss")}</div></div>
       <div style="overflow-x:auto"><div class="heat" id="tg-heat"></div></div></div>`;
@@ -547,7 +560,7 @@ async function renderTarget(root) {
     width: w, height: h, tzDate: tzUTC, legend: { show: false }, scales: { x: { time: true } },
     cursor: { drag: { x: true, y: false }, points: { size: 6, width: 2, fill: css("--surface") }, bind: { dblclick: () => () => { setR(range); return null; } } },
     series: [{}, line(LABEL[t], css("--accent-ink"), { width: 1.25 })],
-    axes: axes(`${LABEL[t]} (${t === "energy" ? "MWh" : "EUR/MWh"})`),
+    axes: axes(`${LABEL[t]} (${meta.units[t]})`),
     plugins: [tooltip(seriesRows(fmtUTC))],
   }, [x, target[t]], root.querySelector("#tg-ts")), chartHeight);
   ts.keepX = true;
@@ -581,7 +594,7 @@ async function renderTarget(root) {
   function stats() {
     const v = target[t].filter(a => a != null), s = Float64Array.from(v).sort(), m = mean(v);
     const sd = Math.sqrt(mean(v.map(a => (a - m) ** 2)));
-    root.querySelector("#tg-k").innerHTML = kpi("Mean", f1(m), t === "energy" ? "MWh" : "EUR/MWh") + kpi("Std", f1(sd)) +
+    root.querySelector("#tg-k").innerHTML = kpi("Mean", f1(m), meta.units[t]) + kpi("Std", f1(sd)) +
       kpi("Exact zeros", pct(v.filter(a => a === 0).length / v.length)) + kpi("Negative", pct(v.filter(a => a < 0).length / v.length)) +
       kpi("Min / max", `${minus(Math.round(s[0]))} / ${Math.round(s[s.length - 1])}`);
     return s;
@@ -598,9 +611,9 @@ async function renderTarget(root) {
     }, [centers, counts], root.querySelector("#tg-h"));
   }, 280);
 
-  // Scatter on a plain canvas (5,000 points; static).
+  // Scatter on a plain canvas (5,000 points; static). Spain only: price vs energy.
   const scEl = root.querySelector("#tg-sc");
-  const pairs = []; for (let i = 0; i < n; i++) if (target.energy[i] != null && target.price[i] != null) pairs.push([target.energy[i], target.price[i]]);
+  const pairs = []; if (scatter) for (let i = 0; i < n; i++) if (target.energy[i] != null && target.price[i] != null) pairs.push([target.energy[i], target.price[i]]);
   let seed = 1; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
   const sample = Array.from({ length: Math.min(5000, pairs.length) }, () => pairs[Math.floor(rnd() * pairs.length)]);
   const drawScatter = w => {
@@ -621,7 +634,7 @@ async function renderTarget(root) {
     for (const [a, b] of sample) if (a >= qx[0] && a <= qx[1] && b >= qy[0] && b <= qy[1]) ctx.fillRect(X(a) - 1.2, Y(b) - 1.2, 2.4, 2.4);
     ctx.globalAlpha = 1; ctx.fillStyle = css("--ink-soft"); ctx.fillText("Price (EUR/MWh) ↑", L + 6, 22);
   };
-  mount(scEl, w => { drawScatter(w); return { destroy() {}, setSize: ({ width }) => drawScatter(width) }; }, 360);
+  if (scatter) mount(scEl, w => { drawScatter(w); return { destroy() {}, setSize: ({ width }) => drawScatter(width) }; }, 360);
 
   function heat() {
     const per = new Map();
@@ -677,13 +690,28 @@ async function renderInputs(root) {
   draw();
 }
 
+// Outside Spain: the market's feature columns from configs/groups.toml (build.py writes them).
+async function renderFeatures(root) {
+  const m = mk(), rows = (await json("features.json"))[m.id];
+  root.innerHTML = `
+    <div class="head"><div><h1>Input features</h1><p class="lede">The columns the ${esc(m.name)} models see, one line each in <span class="mono">configs/groups.toml</span>. Availability <b>future</b> = known for the target day before the gate, <b>past</b> = only known up to the forecast origin.</p></div></div>
+    <div class="card"><div class="card-head"><div><h2>Feature columns</h2><p class="sub">${rows.length} columns</p></div></div>
+      <div class="tablewrap"><table><thead><tr><th>Group</th><th>Column</th><th>Source</th><th>Availability</th><th>Description</th></tr></thead><tbody>${rows.map(r =>
+        `<tr><td class="mono">${esc(r.group)}</td><td class="mono">${esc(r.column)}</td><td class="mono">${esc(r.source)}</td><td>${esc(r.availability)}</td><td class="desc">${esc(r.description)}</td></tr>`).join("")}</tbody></table></div></div>`;
+}
+
 // --- Targets (Predico resources) --------------------------------------------------------
+// live: wired (data, backtest, live run). city/gateLocal/source/missingTruth/about: tab texts.
+const de50Hertz = what => (from, to) => `The truth series from <span class="mono">v2/target_50hertz.parquet</span>: ENTSO-E actual generation, ${what}, 50Hertz control area, MW (mean per quarter-hour), 15-min, ${from} – ${to}. As Predico does, points the curve omits repeat the previous value (curve type A03), each series before summing.`;
+const DE = { program: "50Hertz", gate: "15:00 CET, D-1", live: true, city: "Berlin", gateLocal: "15:00 Berlin on D-1", source: "ENTSO-E", missingTruth: "" };
 const MARKETS = [
-  { id: "es-mfrr", name: "Spain mFRR", note: "energy & price", program: "EDP", gate: "17:00 CET, D-1", resources: ["spain_mfrr_energy", "spain_mfrr_price"], truth: "ESIOS (REE)", live: true },
+  { id: "es-mfrr", name: "Spain mFRR", note: "energy & price", program: "EDP", gate: "17:00 CET, D-1", resources: ["spain_mfrr_energy", "spain_mfrr_price"], truth: "ESIOS (REE)", live: true, catalog: true,
+    city: "Madrid", gateLocal: "17:00 Madrid on D-1", source: "ESIOS", missingTruth: "Quarter-hours without truth (no mFRR activation, so no price) are left out.",
+    about: (from, to) => `The truth series from <span class="mono">v1/target.parquet</span>: mFRR activated <b>energy</b> (net, MWh per quarter-hour, upward positive) and mFRR <b>price</b> (EUR/MWh), Spain, 15-min, ${from} – ${to}. Missing energy is filled with 0 (no activation); missing price stays empty. No data during the Iberian blackout (28 Apr – 6 May 2025). Prices rise from Jul 2026 (monthly mean ~100 → ~157 EUR/MWh).` },
   { id: "be-solar", name: "Belgium solar", program: "Elia", gate: "10:00 CET, D-1 (plus hourly intraday)", resources: ["belgium_solar_opendata_elia"], truth: "Elia Open Data (ods032)" },
   { id: "be-wind", name: "Belgium offshore wind", program: "Elia", gate: "10:00 CET, D-1 (paused by Elia)", resources: ["offshore_wind_opendata_elia"], truth: "Elia Open Data" },
-  { id: "de-solar", name: "Germany solar", note: "50Hertz", program: "50Hertz", gate: "15:00 CET, D-1", resources: ["germany_solar_50hertz_ca"], truth: "50Hertz control area" },
-  { id: "de-wind", name: "Germany wind", note: "50Hertz", program: "50Hertz", gate: "15:00 CET, D-1", resources: ["germany_wind_50hertz_ca"], truth: "50Hertz control area" },
+  { id: "de-solar", name: "Germany solar", note: "50Hertz", resources: ["germany_solar_50hertz_ca"], truth: "ENTSO-E A75 B16, 50Hertz control area", about: de50Hertz("solar (A75 B16)"), ...DE },
+  { id: "de-wind", name: "Germany wind", note: "50Hertz", resources: ["germany_wind_50hertz_ca"], truth: "ENTSO-E A75 B18 + B19, 50Hertz control area", about: de50Hertz("wind offshore + onshore (A75 B18 + B19)"), ...DE },
 ];
 let market = (() => { try { return MARKETS.find(m => m.id === localStorage.getItem("market"))?.id ?? "es-mfrr"; } catch { return "es-mfrr"; } })();
 const TAB_NAMES = { live: "Live forecasts", backtest: "Backtest", target: "Target data", inputs: "Input features" };
@@ -693,7 +721,7 @@ function comingSoon(root, tab) {
     <div class="card soon"><span class="pill muted">coming soon</span>
       <p class="lede">${esc(m.name)} is a Predico target we plan to forecast next. Its data, backtest and live submissions are not wired up yet.</p>
       <dl><dt>Predico resource</dt><dd>${m.resources.map(esc).join(", ")}</dd><dt>Program</dt><dd>${esc(m.program)}</dd><dt>Gate</dt><dd>${esc(m.gate)}</dd><dt>Truth</dt><dd>${esc(m.truth)}</dd></dl>
-      <p class="sub">Want to help? See <a href="https://github.com/arnaud-vs/open-predico/blob/main/PLAN.md#adding-a-target-next-50hertz-wind" target="_blank" rel="noopener">Adding a target</a> in the plan.</p></div>`;
+      <p class="sub">Want to help? See <a href="https://github.com/arnaud-vs/open-predico/blob/main/PLAN.md#adding-a-target" target="_blank" rel="noopener">Adding a target</a> in the plan.</p></div>`;
 }
 function drawMarkets() {
   document.getElementById("markets").innerHTML = MARKETS.map(m => `<button class="chip" data-v="${m.id}" aria-pressed="${m.id === market}">${esc(m.name)}${m.live ? "" : " <small>soon</small>"}</button>`).join("");
@@ -706,7 +734,7 @@ document.getElementById("markets").addEventListener("click", e => {
 });
 
 // --- Routing -----------------------------------------------------------------------------
-const TABS = { live: renderLive, backtest: renderBacktest, target: renderTarget, inputs: renderInputs };
+const TABS = { live: renderLive, backtest: renderBacktest, target: renderTarget, inputs: root => (mk().catalog ? renderInputs : renderFeatures)(root) };
 function show() {
   const tab = TABS[location.hash.slice(1)] ? location.hash.slice(1) : "live";
   document.querySelectorAll("section[data-tab]").forEach(s => (s.hidden = s.dataset.tab !== tab));
@@ -714,7 +742,7 @@ function show() {
   const root = document.getElementById(`tab-${tab}`), key = `${market}:${tab}`;
   if (root.dataset.key === key) return;
   root.dataset.key = key;
-  if (!MARKETS.find(m => m.id === market).live) return comingSoon(root, tab);
+  if (!mk().live) return comingSoon(root, tab);
   root.innerHTML = `<p class="empty">Loading…</p>`;
   TABS[tab](root).catch(e => { root.innerHTML = `<div class="card"><p class="empty">Could not load this tab: ${esc(e.message)}</p></div>`; console.error(e); });
 }
