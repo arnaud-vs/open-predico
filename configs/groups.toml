@@ -2,7 +2,8 @@
 #
 # One table per group, one line per column:
 #   source       "esios:<id>", "calendar:<name>" (computed), "entsoe_bids:<column>" (bid ladder)
-#                or "entsoe:<document>_<psr>" (ENTSO-E REST API, data/entsoe.py)
+#                "entsoe:<document>_<psr>" (ENTSO-E REST API, data/entsoe.py)
+#                or "openmeteo:<area>.<variable>" (weather forecasts, data/openmeteo.py)
 #   geo          ESIOS geo_id, for indicators published for several geos
 #   fill         value for missing quarter-hours (none = keep NaN)
 #   availability "future" = known for the target day before the gate
@@ -91,6 +92,24 @@ wind_50hertz = { source = "entsoe:A75_B18+B19", availability = "past" }  # offsh
 solar_50hertz = { source = "entsoe:A75_B16", availability = "past" }
 wind_50hertz_offshore = { source = "entsoe:A75_B18", availability = "past" }
 wind_50hertz_onshore = { source = "entsoe:A75_B19", availability = "past" }
+
+[entsoe_forecasts_50hertz]  # ENTSO-E day-ahead forecasts, MW
+# A69 is due by 18:00 D-1 (after the 15:00 gate; not yet out at 10:12 on 2026-11-08): past only
+wind_offshore_forecast_50hertz = { source = "entsoe:A69_B18", availability = "past" }
+wind_onshore_forecast_50hertz = { source = "entsoe:A69_B19", availability = "past" }
+solar_forecast_50hertz = { source = "entsoe:A69_B16", availability = "past" }
+# A65 is due by 10:00 D-1 (2 h before the day-ahead auction; out by 10:12 on 2026-11-08)
+load_forecast_50hertz = { source = "entsoe:A65", availability = "future" }
+
+[weather_50hertz]  # Open-Meteo, forecast 48 h before valid time (data/openmeteo.py), area means
+wind_speed_100m = { source = "openmeteo:land.wind_speed_100m", availability = "future" }  # m/s
+wind_speed_10m = { source = "openmeteo:land.wind_speed_10m", availability = "future" }
+wind_speed_100m_offshore = { source = "openmeteo:offshore.wind_speed_100m", availability = "future" }
+ghi = { source = "openmeteo:land.shortwave_radiation", availability = "future" }  # W/m2
+direct_radiation = { source = "openmeteo:land.direct_radiation", availability = "future" }
+diffuse_radiation = { source = "openmeteo:land.diffuse_radiation", availability = "future" }
+cloud_cover = { source = "openmeteo:land.cloud_cover", availability = "future" }  # %
+temperature_2m = { source = "openmeteo:land.temperature_2m", availability = "future" }  # °C
 
 [calendar_de]
 holiday_de = { source = "calendar:holiday_de", availability = "future" }

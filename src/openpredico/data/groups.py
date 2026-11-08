@@ -13,12 +13,12 @@ import pandas as pd
 from dateutil.easter import easter
 
 from openpredico.config import CONFIGS, load_targets
-from openpredico.data import entsoe, entsoe_bids, esios, hf
+from openpredico.data import entsoe, entsoe_bids, esios, hf, openmeteo
 
 TZ = "Europe/Madrid"  # ESIOS local time; calendar default (Spain's targets)
 COLUMN_KEYS = {"source", "geo", "fill", "availability"}
 AVAILABILITY = {"future", "past"}
-PREFIXES = {"esios", "calendar", "entsoe_bids", "entsoe"}
+PREFIXES = {"esios", "calendar", "entsoe_bids", "entsoe", "openmeteo"}
 # ponytail: bid ladder built locally by `entsoe_bids ladder` (File Library login needed), not
 # fetched here. Put it at this path before building the `mfrr_bids` group.
 BIDS_LADDER = CONFIGS.parent / "data" / "bids_ladder.parquet"
@@ -55,7 +55,7 @@ def build(group: str, start: str, end: str, tz: str = TZ) -> pd.DataFrame:
     start, end = pd.Timestamp(start, tz="UTC"), pd.Timestamp(end, tz="UTC")
     grid = pd.date_range(start, end, freq="15min", inclusive="left", name="time")
     columns = load_groups()[group]
-    raw = {}  # one fetch per ESIOS id, shared by its geos
+    raw = {}  # one fetch per ESIOS id (shared by its geos) or Open-Meteo area
     df = pd.DataFrame(index=grid)
     for name, c in columns.items():
         prefix, key = c["source"].split(":")
@@ -67,6 +67,12 @@ def build(group: str, start: str, end: str, tz: str = TZ) -> pd.DataFrame:
             continue
         if prefix == "entsoe":
             df[name] = entsoe.fetch(key, start, end)  # already on the grid
+            continue
+        if prefix == "openmeteo":
+            area, variable = key.split(".")
+            if area not in raw:  # one fetch per area, every variable
+                raw[area] = openmeteo.fetch_frame(area, start, end)
+            df[name] = raw[area][variable]
             continue
         if key not in raw:
             raw[key] = esios.fetch_values(int(key), start, end)

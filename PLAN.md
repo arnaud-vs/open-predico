@@ -139,8 +139,14 @@ its feature groups in `groups.toml`. Remaining Spain-specific code: `to_grid` (E
 - **Capacity:** ENTSO-E A68 installed capacity for 2026 (wind 24.5 GW, solar 25.2 GW); only
   used to clip, the 2025-26 maxima are ~17 GW and ~15 GW.
 - **Features:** `target_50hertz` (both targets and the wind components, past; A75 shows up
-  ~25-40 min after real time), `calendar` (shared, built in Europe/Berlin; `holiday_es` comes
-  along) and `calendar_de` (`holiday_de`).
+  ~25-40 min after real time), `entsoe_forecasts_50hertz` (A65 day-ahead load: future, due
+  10:00 D-1; A69 day-ahead wind/solar: past, due 18:00 D-1, after the gate), `weather_50hertz`
+  (Open-Meteo forecasts issued 48 h ahead, area means: future), `da_market` (v1's day-ahead
+  prices incl. DE-LU, SDAC results ~13:00 D-1: future), `calendar` (shared, built in
+  Europe/Berlin; `holiday_es` comes along) and `calendar_de` (`holiday_de`). See
+  DATA_SOURCES.md for the availability evidence. Next: weather vintages closer to the origin
+  (Open-Meteo `previous_day1` is issued too late for the evening hours; the Single Runs API
+  could give the 00/06 UTC run of D-1).
 - **Live:** `submit` at 14:15 (session 14:00-15:00), `check` at 14:30/14:45, `publish` at 15:30,
   all crons shared with Spain. Needs `ENTSOE_API_KEY` in the Modal secret.
 

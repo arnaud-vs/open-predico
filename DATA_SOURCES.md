@@ -6,7 +6,8 @@ Every source used by open-predico, its license, and whether it may be used live.
 |---|---|---|---|---|---|---|
 | [ESIOS](https://www.esios.ree.es/) (Red Eléctrica) | mFRR truth, market, forecasts, balancing, cross-border | to verify (REE legal notice) | to verify | to verify | planned | pending terms |
 | [ENTSO-E Transparency Platform](https://transparency.entsoe.eu/) | mFRR balancing energy bids (12.3.B/C, File Library), group `mfrr_bids` | ENTSO-E Transparency Platform terms of use: reuse allowed with source attribution; to confirm 12.3.B/C is on ENTSO-E's free re-use list | to confirm | "Source: ENTSO-E Transparency Platform" | not yet | pending terms |
-| [ENTSO-E Transparency Platform](https://transparency.entsoe.eu/) REST API | 50Hertz truth and features (`data/entsoe.py`): actual generation A75 (B16 solar, B18 wind offshore, B19 wind onshore), group `target_50hertz` | ENTSO-E Transparency Platform terms of use: reuse allowed with source attribution | to confirm (A75 is on ENTSO-E's free re-use list, to check) | "Source: ENTSO-E Transparency Platform" | German targets | pending terms |
+| [ENTSO-E Transparency Platform](https://transparency.entsoe.eu/) REST API | 50Hertz truth and features (`data/entsoe.py`): actual generation A75 (B16 solar, B18 wind offshore, B19 wind onshore), group `target_50hertz`; day-ahead wind/solar (A69) and load (A65) forecasts, group `entsoe_forecasts_50hertz` | ENTSO-E Transparency Platform terms of use: reuse allowed with source attribution | to confirm (A75/A69/A65 on ENTSO-E's free re-use list, to check) | "Source: ENTSO-E Transparency Platform" | German targets | pending terms |
+| [Open-Meteo](https://open-meteo.com/) Previous Runs API | 50Hertz weather (`data/openmeteo.py`): wind 10/100 m, radiation, cloud cover, temperature as forecast 48 h ahead, group `weather_50hertz` | Data CC BY 4.0; the free API is non-commercial only | **licence required for production** (API subscription; the maintainer buys it before production) | "Weather data by Open-Meteo.com" | German targets (playground) | pending terms |
 
 Add a row when you add a source.
 
@@ -27,3 +28,20 @@ scored at the time.
 Publication lag of A75 in 50Hertz: ~25-40 min (2026-11-08, 07:25 UTC: data up to 07:00 UTC),
 inside the 2 h `PUBLICATION_LAG` the backtest assumes. The 50Hertz website connector (previous
 truth and past features) was dropped: A75 is the scored series and is just as fresh.
+
+Forecast availability (`availability` in groups.toml), from the Transparency Regulation
+deadlines and one check on 2026-11-08 (`D+1` = 9 Nov): A65 day-ahead load is due by 10:00 D-1 and
+was out at 10:12 (not yet at 08:24), so `future`. A69 day-ahead wind/solar is due by 18:00 D-1,
+after the 15:00 gate, and was not out at 10:12, so `past` only. ENTSO-E does not expose
+publication times, so these are deadlines plus spot checks, not a vintage record; the live run's
+stored inputs are.
+
+## Open-Meteo
+
+`<variable>_previous_day2` from the Previous Runs API: the value forecast 48 h before its valid
+time, so a target day's values were issued before 00:00 D-1, well before the 14:00 origin. The
+backtest and the live run fetch the same field, so both see the same vintage (not the archive or
+reanalysis API, which is truth-like). History since 2024. Means over five land points
+(Brandenburg, Mecklenburg-Vorpommern, Saxony-Anhalt, Saxony, Thuringia) and two Baltic offshore
+points. Two requests per year of data (land, offshore). Free tier: non-commercial; buy the
+API licence before production.
