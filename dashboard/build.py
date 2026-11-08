@@ -120,6 +120,7 @@ def live_frames(demo: bool) -> tuple[dict[str, pd.DataFrame], pd.DataFrame | Non
             runs = download("live", "runs.parquet")
         except Exception:  # dataset not published yet
             return {}, None
+        runs = runs[runs.target.isin(SHORT)]  # ponytail: Spain only until other tabs exist
         frames = {
             SHORT[t]: download("live", f"forecasts/{t}.parquet") for t in runs.target.unique()
         }
