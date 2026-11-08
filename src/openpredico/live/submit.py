@@ -110,6 +110,7 @@ def hindcast(first: str, last: str, only: list[str]) -> None:
     ponytail: ESIOS values revised after the original run time leak in, as in the backtest.
     """
     predict = t0.make_predict(t0.load(MODEL), CONTEXT_DAYS, CATEGORICAL)
+    built = {}  # (groups, tz) -> frames: the Spain targets share one build
     for name in only:
         t = load_targets()[name]
         tz = t["timezone"]
@@ -119,10 +120,12 @@ def hindcast(first: str, last: str, only: list[str]) -> None:
             - pd.Timedelta("45min")
             for d in days
         ]
-        frames = build_frames(nows[-1].tz_convert("UTC"), t["groups"], tz, first=nows[0])
+        key = (tuple(t["groups"]), tz)
+        if key not in built:
+            built[key] = build_frames(nows[-1].tz_convert("UTC"), *key, first=nows[0])
         for now in nows:
             now = now.tz_convert("UTC")
-            fc, inputs = forecast(name, frames, predict, now)
+            fc, inputs = forecast(name, built[key], predict, now)
             validate(fc, now)
             run = f"{name}/{now:%Y-%m-%dT%H%MZ}"
             hf.upload(fc.assign(env="hindcast"), "live-private", f"forecasts/{run}.parquet", run)
