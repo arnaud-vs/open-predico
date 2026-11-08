@@ -101,7 +101,7 @@ solar_forecast_50hertz = { source = "entsoe:A69_B16", availability = "past" }
 # A65 is due by 10:00 D-1 (2 h before the day-ahead auction; out by 10:12 on 2026-11-08)
 load_forecast_50hertz = { source = "entsoe:A65", availability = "future" }
 
-[weather_50hertz]  # Open-Meteo, forecast 48 h before valid time (data/openmeteo.py), area means
+[weather_50hertz]  # Open-Meteo ECMWF IFS, 00 UTC run of D-1 (data/openmeteo.py), area means
 wind_speed_100m = { source = "openmeteo:land.wind_speed_100m", availability = "future" }  # m/s
 wind_speed_10m = { source = "openmeteo:land.wind_speed_10m", availability = "future" }
 wind_speed_100m_offshore = { source = "openmeteo:offshore.wind_speed_100m", availability = "future" }

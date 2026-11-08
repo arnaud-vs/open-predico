@@ -3,23 +3,29 @@ import pandas as pd
 from openpredico.data import openmeteo
 
 
-def test_hourly_to_quarter_hours_radiation_is_preceding_hour(monkeypatch):
-    hours = pd.date_range("2026-06-01 09:00", periods=3, freq="h", tz="UTC")
-    hourly = pd.DataFrame({v: [1.0, 2.0, 3.0] for v in openmeteo.VARIABLES}, index=hours)
-    monkeypatch.setattr(openmeteo, "_get", lambda points, start, end: hourly)
-    monkeypatch.setattr(openmeteo.time, "sleep", lambda s: None)
-    out = openmeteo.fetch_frame(
-        "land",
-        pd.Timestamp("2026-06-01 09:00", tz="UTC"),
-        pd.Timestamp("2026-06-01 11:00", tz="UTC"),
-    )
-    assert list(out.wind_speed_100m) == [1.0] * 4 + [2.0] * 4  # instant value, repeated
-    assert list(out.shortwave_radiation) == [2.0] * 4 + [3.0] * 4  # 10:00 = 09:00-10:00 mean
+def test_each_local_day_reads_the_00z_run_of_the_day_before():
+    day = pd.Timestamp("2026-03-29", tz="Europe/Berlin")  # DST day
+    assert openmeteo.run_time(day) == pd.Timestamp("2026-03-28 00:00", tz="UTC")
+    origin = (day - pd.Timedelta(days=1)).replace(hour=14).tz_convert("UTC")
+    assert openmeteo.run_time(day) + pd.Timedelta("8h") < origin  # published ~08:00 UTC
 
 
-def test_vintage_is_issued_before_the_origin():
-    # Latest value used: D+2 00:00 UTC (radiation of D+1's last hour). Origin: 14:00 D-1 local.
-    lead = pd.Timedelta(days=int(openmeteo.VINTAGE.removeprefix("previous_day")))
-    latest = pd.Timestamp("2026-11-11 00:00", tz="UTC")  # D+1 = 10 Nov
-    origin = pd.Timestamp("2026-11-09 14:00", tz="Europe/Berlin")
-    assert latest - lead <= origin - pd.Timedelta("6h")  # with slack for run publication
+def test_run_keeps_its_local_day_and_shifts_radiation_to_the_hour_it_ends(monkeypatch):
+    hours = pd.date_range("2026-06-01 00:00", periods=72, freq="h", tz="UTC")
+    times = list(hours.strftime("%Y-%m-%dT%H:%M"))
+    hourly = {"time": times, **{v: list(range(72)) for v in openmeteo.VARIABLES}}
+    n = sum(len(p) for p in openmeteo.POINTS.values())
+
+    class Resp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return [{"hourly": hourly}] * n
+
+    monkeypatch.setattr(openmeteo._session, "get", lambda *a, **k: Resp())
+    out = openmeteo._run(pd.Timestamp("2026-06-02", tz="Europe/Berlin"))["land"]
+    assert out.index[0] == pd.Timestamp("2026-06-01 22:00", tz="UTC")  # local midnight
+    assert len(out) == 24
+    assert out.wind_speed_100m.iloc[0] == 22  # instant value at 22:00
+    assert out.shortwave_radiation.iloc[0] == 23  # 22:00-23:00 mean, labelled 23:00 by the API

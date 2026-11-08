@@ -70,9 +70,9 @@ def build(group: str, start: str, end: str, tz: str = TZ) -> pd.DataFrame:
             continue
         if prefix == "openmeteo":
             area, variable = key.split(".")
-            if area not in raw:  # one fetch per area, every variable
-                raw[area] = openmeteo.fetch_frame(area, start, end)
-            df[name] = raw[area][variable]
+            if prefix not in raw:  # one request per day for every area and variable
+                raw[prefix] = openmeteo.fetch(start, end)
+            df[name] = raw[prefix][area][variable]
             continue
         if key not in raw:
             raw[key] = esios.fetch_values(int(key), start, end)
