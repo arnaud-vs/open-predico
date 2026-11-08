@@ -10,7 +10,7 @@ class _Client:
         return {
             "spain_mfrr_energy": [{"id": "e", "resource_name": name}],
             "spain_mfrr_price": [{"id": "p", "resource_name": name}],
-        }[name]
+        }.get(name, [])  # no open German session
 
 
 def test_not_ready_only_lists_our_uncovered_challenges():

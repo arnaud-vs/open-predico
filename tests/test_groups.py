@@ -1,7 +1,13 @@
 import pandas as pd
 import pytest
 
-from openpredico.data.groups import dst_switch_day, holiday_es, load_groups, to_grid
+from openpredico.data.groups import (
+    dst_switch_day,
+    holiday_de,
+    holiday_es,
+    load_groups,
+    to_grid,
+)
 
 
 def test_repo_groups_are_valid():
@@ -61,3 +67,11 @@ def test_calendar_holiday_and_dst():
     )
     assert list(holiday_es(days)) == [1, 0, 0, 0, 0, 1]  # Good Friday, Immaculate Conception
     assert list(dst_switch_day(days)) == [0, 0, 1, 1, 0, 0]
+
+
+def test_holiday_de_uses_berlin_dates():
+    days = pd.to_datetime(
+        ["2026-05-14 10:00", "2026-05-25 10:00", "2026-10-02 22:30", "2026-10-12 10:00"],
+        utc=True,
+    )  # Ascension, Whit Monday, 3 Oct 00:30 Berlin (German Unity), 12 Oct (Spanish only)
+    assert list(holiday_de(days)) == [1, 1, 1, 0]

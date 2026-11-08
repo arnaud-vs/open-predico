@@ -1,7 +1,8 @@
-"""Daily live run: t0-gamma D+1 (v1 covariates, 90-day context) plus slot-climatology D+2..D+10
-for every target -> HF live-private -> Predico.
+"""Daily live run: t0-gamma D+1 (the target's groups as covariates, 90-day context) plus
+slot-climatology D+2..D+10 for every target -> HF live-private -> Predico.
 
-Usage: python -m openpredico.live.submit [--dry-run]   (--dry-run skips HF and Predico)
+Usage: python -m openpredico.live.submit [--dry-run] [--target a,b] [--check]
+       --dry-run skips HF and Predico; --target limits the run to these targets.
 Needs the t0 extra: `uv sync --extra t0`.
 """
 
@@ -12,9 +13,9 @@ import pandas as pd
 
 from openpredico.config import load_targets
 from openpredico.data import hf
-from openpredico.data.groups import build, load_groups
-from openpredico.evaluation.backtest import PUBLICATION_LAG
-from openpredico.evaluation.experiment import CATEGORICAL, NOT_IN_V1, features
+from openpredico.data.groups import build
+from openpredico.evaluation.backtest import PUBLICATION_LAG, clip
+from openpredico.evaluation.experiment import CATEGORICAL, features
 from openpredico.live.predico import Predico
 from openpredico.models.baselines import slot_climatology
 from openpredico.models.tsfm import t0
@@ -23,23 +24,25 @@ MODEL = "theforecastingcompany/t0-gamma"  # best Apache-2.0 model in the backtes
 CONFIG, FALLBACK = "t0gamma_cov_ctx90", "slot_climatology_28d"  # backtest config names
 CONTEXT_DAYS = 90
 HORIZON_DAYS = 10
-TZ = "Europe/Madrid"
 
 
-def build_frames(now: pd.Timestamp) -> dict[str, pd.DataFrame]:
-    """Every v1 group from CONTEXT_DAYS before now through the end of D+1 (local)."""
-    local = now.tz_convert(TZ)
+def build_frames(now: pd.Timestamp, groups: list[str], tz: str) -> dict[str, pd.DataFrame]:
+    """`groups` from CONTEXT_DAYS before now through the end of D+1 (local time `tz`)."""
+    local = now.tz_convert(tz)
     start = (local - pd.Timedelta(days=CONTEXT_DAYS + 1)).normalize().tz_convert("UTC")
     end = (local.normalize() + pd.DateOffset(days=2)).tz_convert("UTC")
     start, end = start.tz_localize(None).isoformat(), end.tz_localize(None).isoformat()
     # ponytail: ~30 ESIOS ids x 4 monthly chunks at 1 req/s, refetched daily; cache on HF if slow
-    return {g: build(g, start, end) for g in load_groups() if g not in NOT_IN_V1}
+    # ponytail: 50Hertz: one request per local day, 2 s apart (~3 min for 92 days)
+    return {g: build(g, start, end, tz) for g in groups}
 
 
 def forecast(
-    target: str, tz: str, frames: dict[str, pd.DataFrame], predict: Callable, now: pd.Timestamp
+    target: str, frames: dict[str, pd.DataFrame], predict: Callable, now: pd.Timestamp
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """(forecast D+1..D+10 within 240 h, exact model inputs). Same cut as the backtest."""
+    t = load_targets()[target]
+    tz = t["timezone"]
     # ponytail: the >90%-missing column drop is decided on the live window, not the backtest's
     history, future_cols = features(frames, target)
     days = pd.date_range(
@@ -54,7 +57,7 @@ def forecast(
     past = past.drop(columns=future_cols)
     d1 = predict(past, future, days[:1])
     rest = slot_climatology(past.iloc[:, 0], days[1:], tz=tz)  # D+2..D+10: unpaid fallback
-    fc = pd.concat([d1.assign(model=CONFIG), rest.assign(model=FALLBACK)])
+    fc = clip(pd.concat([d1.assign(model=CONFIG), rest.assign(model=FALLBACK)]), t)
     # Predico accepts at most 240 h ahead, so the tail of D+10 is cut
     return fc[fc.index <= now + pd.Timedelta(hours=240)], pd.concat([past, future], axis=1)
 
@@ -68,13 +71,20 @@ def validate(fc: pd.DataFrame, now: pd.Timestamp) -> None:
     assert (fc.index.to_series().diff().dropna() == pd.Timedelta("15min")).all(), "grid has gaps"
 
 
-def main(dry_run: bool) -> None:
+def main(dry_run: bool, only: list[str] | None = None) -> None:
+    """Submit every target, or only the targets named in `only`."""
     now = pd.Timestamp.now(tz="UTC")
+    targets = {n: t for n, t in load_targets().items() if not only or n in only}
+    if unknown := set(only or ()) - targets.keys():
+        sys.exit(f"unknown targets: {sorted(unknown)}")
     client = None if dry_run else Predico()  # log in first: fail fast on bad credentials
-    frames = build_frames(now)
     predict = t0.make_predict(t0.load(MODEL), CONTEXT_DAYS, CATEGORICAL)
-    for name, target in load_targets().items():
-        fc, inputs = forecast(name, target["timezone"], frames, predict, now)
+    built = {}  # (groups, tz) -> frames: the Spain targets share one build
+    for name, target in targets.items():
+        key = (tuple(target["groups"]), target["timezone"])
+        if key not in built:
+            built[key] = build_frames(now, *key)
+        fc, inputs = forecast(name, built[key], predict, now)
         validate(fc, now)
         print(f"{name}: {len(fc)} steps {fc.index.min()} .. {fc.index.max()}")  # no values
         if dry_run:
@@ -107,7 +117,10 @@ def check_and_retry() -> None:
     print(f"not ready: {missing}")
     if not missing:
         return  # covered, or no session of ours open right now
-    main(dry_run=False)
+    main(
+        dry_run=False,
+        only=[n for n, t in load_targets().items() if t["predico_resource"] in missing],
+    )
     if missing := not_ready(Predico()):
         sys.exit(f"still not ready after resubmit: {missing}")
 
@@ -116,4 +129,7 @@ if __name__ == "__main__":
     if "--check" in sys.argv:
         check_and_retry()
     else:
-        main(dry_run="--dry-run" in sys.argv)
+        only = (
+            sys.argv[sys.argv.index("--target") + 1].split(",") if "--target" in sys.argv else None
+        )
+        main(dry_run="--dry-run" in sys.argv, only=only)

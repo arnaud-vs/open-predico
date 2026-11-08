@@ -1,7 +1,8 @@
 """Backtest a TSFM with covariates on the published features (`open-predico/benchmark`, v1).
 
-Every v1 column is used: `availability` in groups.toml splits known-future from past columns,
-the target is the first column and the other target a past covariate. Predictions (with the
+Every column of the target's `groups` (targets.toml) is used: `availability` in groups.toml
+splits known-future from past columns, the target is the first column and the other columns of
+its group (e.g. the other Spain target) are past covariates. Predictions (with the
 truth as `obs`) go to `<out>/<config>/<target>.parquet`, ready for `evaluation.results`.
 `drop` leaves out comma-separated columns (ablation); `drop=all` keeps only the target history
 (univariate: no past, known-future or calendar covariates).
@@ -20,10 +21,9 @@ import pandas as pd
 from openpredico.config import load_targets
 from openpredico.data.groups import load_groups
 from openpredico.data.hf import download
-from openpredico.evaluation.backtest import backtest
+from openpredico.evaluation.backtest import backtest, clip
 
-# ponytail: target name -> its column; move to targets.toml when a third target arrives.
-TARGET_COLUMNS = {"spain_mfrr_energy": "mfrr_energy", "spain_mfrr_price": "mfrr_price"}
+TARGET_COLUMNS = {name: t["column"] for name, t in load_targets().items()}
 CATEGORICAL = ["qh_of_day", "weekday"]
 # Hugging Face org of the weights -> adapter module in models/tsfm/.
 ADAPTERS = {
@@ -36,7 +36,7 @@ MAX_NAN = 0.9  # columns missing more than this share of the history are dropped
 
 
 # ponytail: groups added after v1 (not on HF yet); drop once v2 is published and chosen.
-NOT_IN_V1 = {"mfrr_bids"}
+NOT_IN_V1 = {"mfrr_bids", "wind_50hertz", "calendar_de"}
 
 
 def load_v1(version: str = "v1") -> dict[str, pd.DataFrame]:
@@ -52,10 +52,12 @@ def features(
     `drop`: comma-separated columns to leave out, or "all" for the target alone.
     """
     groups = load_groups()
-    y = TARGET_COLUMNS[target]
+    t = load_targets()[target]
+    y = t["column"]
+    df = pd.concat([frames[g] for g in t["groups"] if g in frames], axis=1)
     if drop == "all":
-        return frames["target"][[y]].astype(float), []
-    df = pd.concat(frames.values(), axis=1).drop(columns=[c for c in drop.split(",") if c])
+        return df[[y]].astype(float), []
+    df = df.drop(columns=[c for c in drop.split(",") if c])
     nan = df.isna().mean()
     drop = [c for c in nan.index[nan > MAX_NAN] if c not in TARGET_COLUMNS.values()]
     if drop:
@@ -84,16 +86,19 @@ def run(
     adapter = importlib.import_module(f"openpredico.models.tsfm.{ADAPTERS[repo.split('/')[0]]}")
     model = adapter.load(repo, device)
     for target, t in load_targets().items():
+        if NOT_IN_V1 & set(t["groups"]):
+            print(f"{target}: skipped, its groups are not in v1")
+            continue
         history, future = features(frames, target, drop)
         days = pd.date_range(*t["test_period"], tz=t["timezone"])
         predict = adapter.make_predict(model, context_days, CATEGORICAL)
         start = time.time()
-        preds = backtest(predict, history, days, origin or t["origin"], future)
+        preds = clip(backtest(predict, history, days, origin or t["origin"], future), t)
         print(
             f"{target}: {len(future)} future, {history.shape[1] - 1 - len(future)} past "
             f"columns, {len(days)} days in {time.time() - start:.0f} s"
         )
-        preds["obs"] = frames["target"][TARGET_COLUMNS[target]]  # raw truth, NaN kept
+        preds["obs"] = history[t["column"]]  # raw truth, NaN kept
         preds.index.name = "time"
         (out / config).mkdir(parents=True, exist_ok=True)
         preds.to_parquet(out / config / f"{target}.parquet")

@@ -4,10 +4,14 @@
 #         "generation" -> clipped to [0, capacity]
 # origin: local time on D-1 when the forecast is made (the live run is later, 16:15 Madrid)
 # gate:   local time on D-1 when Predico closes the D+1 session
+# column: the target's column in `groups`, whose source is `truth`
+# groups: feature groups (configs/groups.toml) the target's models see
 
 [spain_mfrr_energy]
 predico_resource = "spain_mfrr_energy"
 truth = "esios:10250"
+column = "mfrr_energy"
+groups = ["target", "mfrr", "da_market", "ree_forecasts", "balancing", "xborder", "calendar"]
 unit = "MWh"
 kind = "market"
 timezone = "Europe/Madrid"
@@ -18,9 +22,27 @@ test_period = ["2025-11-01", "2026-10-31"]
 [spain_mfrr_price]
 predico_resource = "spain_mfrr_price"
 truth = "esios:2197"
+column = "mfrr_price"
+groups = ["target", "mfrr", "da_market", "ree_forecasts", "balancing", "xborder", "calendar"]
 unit = "EUR/MWh"
 kind = "market"
 timezone = "Europe/Madrid"
 origin = "14:00"
 gate = "17:00"
+test_period = ["2025-11-01", "2026-10-31"]
+
+[germany_wind_50hertz_ca]
+predico_resource = "germany_wind_50hertz_ca"
+# Predico's truth: ENTSO-E A75 B18 + B19 (offshore + onshore), 10YDE-VE-------2, each series
+# carried forward before summing. 50Hertz's own onshore + offshore should match: unverified.
+truth = "fiftyhertz:actual_sum"
+column = "wind_50hertz"
+# holiday_es comes along with the shared calendar group (v1 layout); ablate with `drop`
+groups = ["wind_50hertz", "calendar", "calendar_de"]
+unit = "MW"
+kind = "generation"
+capacity = 26000  # ponytail: approx. installed onshore + offshore in the area (2026)
+timezone = "Europe/Berlin"
+origin = "13:00"  # live run at 13:30, before the 14:00 session
+gate = "15:00"
 test_period = ["2025-11-01", "2026-10-31"]
