@@ -7,7 +7,7 @@ This document records the decisions made before coding and why. Change it via PR
 ## Scope
 
 - **Launch target:** Spain mFRR (EDP program) — `spain_mfrr_energy` (MWh, signed) and `spain_mfrr_price` (EUR/MWh, ~7% exact zeros, almost all in quarter-hours with net downward activation). Day-ahead, 15-min resolution, gate closure 17:00 CET D-1. Ground truth: ESIOS indicators 10250 and 2197.
-- **Next:** 50Hertz wind (`germany_wind_50hertz_ca`, gate 15:00 CET D-1). More targets are configuration, not code.
+- **Next:** 50Hertz wind (`germany_wind_50hertz_ca`, gate 15:00 CET D-1): wired, benchmark pending (see Adding a target). More targets are configuration, not code.
 - **Main forecasting engines:** time-series foundation models (TSFMs). ML models (LightGBM) and simple baselines are benchmarked alongside.
 - No public benchmark exists for Spanish mFRR. Building one is part of the goal.
 
@@ -113,7 +113,7 @@ Rules enforced by the harness:
 ## Live operations
 
 - **Continuous submission only:** one forecast per day covering D+1 to D+10. Predico slices it at each gate closure. If a run fails, yesterday's forecast still covers tomorrow. D+1 comes from the live config (`t0gamma_cov_ctx90`: best Apache-2.0 model in the backtest, 2026-11-03), D+2 to D+10 from the slot-climatology baseline. EDP program pays D+1 only (Predico programs page, Nov 2026), so D+2 to D+10 exist only as a fallback.
-- **Scheduler: Modal** (`live/modal_app.py`, Starter plan). GitHub Actions cron was dropped (2026-11-05): scheduled runs started 5-7 h late. Times are Madrid local: `submit` at 16:15, `check` at 16:30 and 16:45 resubmits only if an open challenge isn't `ready` in `market/session/coverage` (the session opens the hour before the 17:00 gate; `gate_closure` in the API is authoritative). Cost ~$0.5/month, inside the $1 free credit; check Modal's usage page. `publish` at 17:30 (not built yet).
+- **Scheduler: Modal** (`live/modal_app.py`, Starter plan). GitHub Actions cron was dropped (2026-11-05): scheduled runs started 5-7 h late. Times are Madrid local: `submit` at 16:15 (Spain), `submit_de` at 13:30 (50Hertz wind), `check` at 14:30, 14:45, 16:30 and 16:45 resubmits only the targets whose open challenge isn't `ready` in `market/session/coverage` (the session opens the hour before the 17:00 gate; `gate_closure` in the API is authoritative). Cost ~$0.5/month, inside the $1 free credit; check Modal's usage page. `publish` at 17:30 (all targets).
 - **Late features:** filled with NaN and recorded; the retry submits the full forecast if the data has arrived. The latest submission counts.
 - **`submit`:** build features → predict → validate (full grid, no NaN, sorted, ≤ 240 h) → submit → check coverage → save forecast and exact inputs to HF `live-private`. Never prints forecast values (logs may be shared; the repo is public).
 - **`publish`:** after gate closure, copy closed days to public HF `live`; fetch actuals and Predico's official scores for us; recompute scores until the month freezes (day 7 of the next month); fail if today's submission is missing.
@@ -122,16 +122,33 @@ Rules enforced by the harness:
 - **Before go-live:** dry run on the Predico playground; historical forecast export from the backtest if required.
 - **Playground:** production unlocks after 5 days of good playground predictions, so the live record starts on the playground. Every run is stored and published with `env` = `playground` or `production`. Both Spain resources and `germany_wind_50hertz_ca` exist there (checked 2026-11-03). Auth: access token ~1 h, refresh 24 h, no long-lived API key, so the password stays a secret.
 
-## Adding a target (next: 50Hertz wind)
+## Adding a target
 
-"More targets are configuration" is the goal, not the state yet. Spain is hard-coded in these places; a second target with other features has to lift them:
+A target is an entry in `targets.toml` (`column`, `groups`, `truth`, `timezone`, `gate`, ...) plus
+its feature groups in `groups.toml`. Remaining Spain-specific code: `to_grid` (ESIOS hourly to
+15-min switch at Madrid midnight), the mFRR zero fill in `experiment.features`, the single
+`PUBLICATION_LAG`, and the Modal crons in `modal_app.py` (one per gate time; Starter allows 5).
 
-- **Truth and features:** `germany_wind_50hertz_ca` needs ENTSO-E (or Predico's raw-data endpoint, `docs/downloading_raw_data/`) instead of ESIOS. Add one fetch module and its prefix in `data/groups.py` (`PREFIXES`); ENTSO-E at most one request every 2 s. Candidate features: TSO day-ahead wind forecast (ENTSO-E A69), actual wind (A75 B18/B19), calendar.
-- **Which groups belong to which target:** `groups.toml` is one global set and `experiment.features()` concatenates every group. Add a `groups = [...]` key per target in `targets.toml`, and move `TARGET_COLUMNS` (`evaluation/experiment.py`) there too.
-- **Time zone:** `data/groups.py` (`TZ`, calendar, `holiday_es`) and `live/submit.py` (`TZ`) assume Europe/Madrid. Use the target's `timezone`; German holidays need their own calendar column.
-- **`kind = "generation"`:** `config.py` requires a `capacity`, but nothing clips to [0, capacity] yet. Add it after predict, in both the backtest and live.
-- **Benchmark:** build the target's groups into the next HF dataset version, backtest the baseline plus the TSFMs, and pick a live config with a commercial-use licence (TimesFM 3 is out).
-- **Live:** gate 15:00 CET (14:00 UTC), session 13:00 to 14:00 UTC, so it needs its own run (before 13:00 UTC) and its own `--check` times. Add a `--target` filter to `live/submit.py` and two more functions in `live/modal_app.py` (Starter allows 5 crons).
+### 50Hertz wind (`germany_wind_50hertz_ca`), wired 2026-11-08
+
+- **Truth:** 50Hertz onshore + offshore actuals (`fiftyhertz:actual_sum`, `data/fiftyhertz.py`).
+  Predico scores against ENTSO-E A75 B18 + B19 in `10YDE-VE-------2`, each series carried forward
+  before summing, re-imported over a rolling 35 days (Predico 50Hertz program page). Parity with
+  50Hertz's own figures is unverified: compare with Predico's raw-data endpoint
+  (`data/raw-measurements/`, needs the maintainer's login) before trusting live scores.
+- **Features:** `wind_50hertz` (past actuals; ~25 min publication lag observed), `calendar`
+  (shared, built in Europe/Berlin; `holiday_es` comes along) and `calendar_de` (`holiday_de`).
+  No known-future weather input yet: 50Hertz's and ENTSO-E's D-1 wind forecasts are published at
+  18:00, after the gate. Candidates: DWD ICON open data, German day-ahead price (`da_price_de`,
+  ESIOS 600, if published before 13:30).
+- **Live:** `submit_de` at 13:30 local (before the 14:00-15:00 session), `check` shared with Spain
+  (14:30/14:45 and 16:30/16:45). Same model as Spain (t0-gamma + climatology fallback) until the
+  benchmark picks one. No ESIOS calls: ~92 daily 50Hertz requests, 2 s apart (~3 min).
+- **To do:** build `wind_50hertz` and `calendar_de` into the next benchmark version
+  (`python -m openpredico.data.groups --groups wind_50hertz,calendar,calendar_de ...`; use the
+  50Hertz annual downloads for the multi-year backfill, the daily fetcher is slow), remove them
+  from `NOT_IN_V1`, backtest the baseline and the TSFMs, pick the live config, check the capacity
+  (26 GW, approximate), then a playground run.
 
 ## Predico rules that shape the repo
 
