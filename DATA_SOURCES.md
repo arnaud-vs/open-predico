@@ -41,8 +41,9 @@ turns out late).
 
 ## Open-Meteo
 
-`<variable>_previous_day2` from the Previous Runs API: the value forecast 48 h before its valid
-time, so a target day's values were issued before 00:00 D-1, well before the 14:00 origin. The
+`<variable>_previous_day3` from the Previous Runs API: the value forecast 72 h before its valid
+time, so a target day's values were issued by 00:00 UTC on D-1, well before the 14:00 origin
+(`_previous_day2` would leak: 48 h before D+1's afternoon is after the origin). The
 backtest and the live run fetch the same field, so both see the same vintage (not the archive or
 reanalysis API, which is truth-like). History since 2024. Means over five land points
 (Brandenburg, Mecklenburg-Vorpommern, Saxony-Anhalt, Saxony, Thuringia) and two Baltic offshore

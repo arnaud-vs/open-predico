@@ -1,10 +1,11 @@
-"""Open-Meteo weather forecasts as issued two days ahead, averaged over a few points per area.
+"""Open-Meteo weather forecasts as issued three days ahead, averaged over a few points per area.
 
-Previous Runs API (https://open-meteo.com/en/docs/previous-runs-api), `<variable>_previous_day2`:
-the value forecast 48 h before its valid time. A target day's last hour was forecast before
-00:00 on D-1, so these values are known well before a 14:00 D-1 origin, in the backtest and the
-live run alike (same vintage, history from 2024). Model: Open-Meteo's best match (ICON in
-Germany). Hourly values are repeated per quarter-hour.
+Previous Runs API (https://open-meteo.com/en/docs/previous-runs-api), `<variable>_previous_day3`:
+"the value that was predicted" 72 h before its valid time. The latest value we use (D+2 00:00
+UTC, the hour after a target day for radiation) was predicted at D-1 00:00 UTC, hours before a
+14:00 D-1 origin, in the backtest and the live run alike (same vintage, history from 2024).
+Not `_previous_day2`: 48 h before D+1's afternoon is D-1's afternoon, after the origin.
+Model: Open-Meteo's best match (ICON in Germany). Hourly values are repeated per quarter-hour.
 
 Keys (`openmeteo:<area>.<variable>` in groups.toml): an area of POINTS and an hourly variable.
 No key needed; the free tier is non-commercial (DATA_SOURCES.md).
@@ -16,6 +17,7 @@ import pandas as pd
 import requests
 
 BASE_URL = "https://previous-runs-api.open-meteo.com/v1/forecast"
+VINTAGE = "previous_day3"  # 72 h before valid time: issued before every origin (docstring)
 # ponytail: a handful of hand-picked points across the 50Hertz area, plain mean per area.
 POINTS = {  # area -> [(lat, lon)]
     "land": [
@@ -61,14 +63,14 @@ def fetch_frame(area: str, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFra
 
 
 def _get(points: list, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
-    """Hourly `_previous_day2` values in [start, end), mean over `points`."""
+    """Hourly `_{VINTAGE}` values in [start, end), mean over `points`."""
     last = end - pd.Timedelta("1ns")
     resp = requests.get(
         BASE_URL,
         params={
             "latitude": ",".join(str(p[0]) for p in points),
             "longitude": ",".join(str(p[1]) for p in points),
-            "hourly": ",".join(f"{v}_previous_day2" for v in VARIABLES),
+            "hourly": ",".join(f"{v}_{VINTAGE}" for v in VARIABLES),
             "start_date": f"{start - pd.Timedelta('1h'):%Y-%m-%d}",  # radiation: next hour's mean
             "end_date": f"{last + pd.Timedelta('1h'):%Y-%m-%d}",
             "timezone": "GMT",
@@ -82,5 +84,5 @@ def _get(points: list, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
     for loc in locations if isinstance(locations, list) else [locations]:
         df = pd.DataFrame(loc["hourly"])
         df.index = pd.to_datetime(df.pop("time"), utc=True)
-        frames.append(df.rename(columns=lambda c: c.removesuffix("_previous_day2")))
+        frames.append(df.rename(columns=lambda c: c.removesuffix(f"_{VINTAGE}")))
     return pd.concat(frames).groupby(level=0).mean()
