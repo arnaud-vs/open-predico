@@ -26,10 +26,13 @@ CONTEXT_DAYS = 90
 HORIZON_DAYS = 10
 
 
-def build_frames(now: pd.Timestamp, groups: list[str], tz: str) -> dict[str, pd.DataFrame]:
-    """`groups` from CONTEXT_DAYS before now through the end of D+1 (local time `tz`)."""
+def build_frames(
+    now: pd.Timestamp, groups: list[str], tz: str, first: pd.Timestamp | None = None
+) -> dict[str, pd.DataFrame]:
+    """`groups` from CONTEXT_DAYS before `first` (default now) through the end of now's D+1."""
     local = now.tz_convert(tz)
-    start = (local - pd.Timedelta(days=CONTEXT_DAYS + 1)).normalize().tz_convert("UTC")
+    since = (first if first is not None else now).tz_convert(tz)
+    start = (since - pd.Timedelta(days=CONTEXT_DAYS + 1)).normalize().tz_convert("UTC")
     end = (local.normalize() + pd.DateOffset(days=2)).tz_convert("UTC")
     start, end = start.tz_localize(None).isoformat(), end.tz_localize(None).isoformat()
     # ponytail: ~30 ESIOS ids x 4 monthly chunks at 1 req/s, refetched daily; cache on HF if slow
@@ -98,6 +101,35 @@ def main(dry_run: bool, only: list[str] | None = None) -> None:
         print("coverage:", client.coverage())
 
 
+def hindcast(first: str, last: str, only: list[str]) -> None:
+    """Rerun the live model for past target days [first, last] we never submitted.
+
+    Each run is cut exactly as a live run 45 min before that day's gate (`forecast`), from one
+    data build for the whole span. Saved to `live-private` with env "hindcast", so the dashboard
+    shows it as a model forecast without a submission. Never sent to Predico.
+    ponytail: ESIOS values revised after the original run time leak in, as in the backtest.
+    """
+    predict = t0.make_predict(t0.load(MODEL), CONTEXT_DAYS, CATEGORICAL)
+    for name in only:
+        t = load_targets()[name]
+        tz = t["timezone"]
+        days = pd.date_range(first, last, tz=tz)
+        nows = [
+            (pd.Timestamp(f"{d - pd.Timedelta(days=1):%Y-%m-%d} {t['gate']}", tz=tz))
+            - pd.Timedelta("45min")
+            for d in days
+        ]
+        frames = build_frames(nows[-1].tz_convert("UTC"), t["groups"], tz, first=nows[0])
+        for now in nows:
+            now = now.tz_convert("UTC")
+            fc, inputs = forecast(name, frames, predict, now)
+            validate(fc, now)
+            run = f"{name}/{now:%Y-%m-%dT%H%MZ}"
+            hf.upload(fc.assign(env="hindcast"), "live-private", f"forecasts/{run}.parquet", run)
+            hf.upload(inputs, "live-private", f"inputs/{run}.parquet", f"Inputs {run}")
+            print(f"{run}: hindcast saved")  # no values
+
+
 def in_session(now: pd.Timestamp) -> list[str]:
     """Targets whose D+1 session is open now: the hour before their gate, local time."""
     out = []
@@ -138,6 +170,9 @@ def check_and_retry() -> None:
 if __name__ == "__main__":
     if "--check" in sys.argv:
         check_and_retry()
+    elif "--hindcast" in sys.argv:  # --hindcast FIRST LAST --target a,b (local target days)
+        i = sys.argv.index("--hindcast")
+        hindcast(*sys.argv[i + 1 : i + 3], sys.argv[sys.argv.index("--target") + 1].split(","))
     else:
         only = (
             sys.argv[sys.argv.index("--target") + 1].split(",") if "--target" in sys.argv else None

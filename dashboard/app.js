@@ -213,7 +213,7 @@ async function renderLive(root) {
     const e10 = pick(s10, T.q10), e50 = pick(s50, T.q50), e90 = pick(s90, T.q90);
     const model = dailyScores(x, e10, e50, e90, T.obs);
     const base = new Map(dailyScores(x, T.b10, T.b50, T.b90, T.obs).map(d => [d.key, d]));
-    // Day record: registered by Predico, continuous forecast only, or missed.
+    // Day record: registered by Predico, model forecast only (not submitted), or none.
     const dayInfo = new Map();
     for (let i = 0; i < n; i++) {
       const key = madrid(x[i]).day;
@@ -227,7 +227,7 @@ async function renderLive(root) {
     const counts = { sub: 0, cont: 0, miss: 0 };
     for (const d of record) d.state = d.rows === 0 ? "miss" : d.sub ? "sub" : "cont";
     record.forEach(d => counts[d.state]++);
-    const STATE = { sub: "submitted", cont: "not confirmed", miss: "missed" };
+    const STATE = { sub: "submitted", cont: "not submitted", miss: "no forecast" };
     const envNote = live.demo
       ? `<div class="banner"><b>Demo data.</b> No live forecasts are published yet, so this shows the last 21 backtest days of <span class="mono">${esc(T.model)}</span> in the live format.</div>`
       : T.env === "playground"
@@ -236,13 +236,13 @@ async function renderLive(root) {
     const body = root.querySelector("#lv-body");
     body.innerHTML = `${envNote}
       <div class="card">
-        <div class="card-head"><div><h2>Forecast vs measured</h2><p class="sub">Solid: what Predico registered as our submission. Dotted on top: our continuous forecast. ${unit} · times in UTC</p></div>
+        <div class="card-head"><div><h2>Forecast vs measured</h2><p class="sub">Dotted: our model's forecast as of the gate. Solid underneath: what Predico registered; days without it were not submitted. ${unit} · times in UTC</p></div>
         <div class="controls">${seg("lv-r", [["7", "7 days"], ["30", "30 days"], ["all", "All"]], "7")}</div></div>
         <div class="chart" id="lv-chart"></div>
         <div class="foot"><div class="legend" id="lv-legend">
           <button data-s="6" aria-pressed="true"><span class="sw" style="border-color:var(--obs)"></span>Observed (${m.source})</button>
           <button data-s="3" aria-pressed="true"><span class="sw thick" style="border-color:var(--sub)"></span>Submitted forecast</button>
-          <button data-s="4" aria-pressed="true"><span class="sw dot" style="border-color:var(--cont)"></span>Continuous forecast</button>
+          <button data-s="4" aria-pressed="true"><span class="sw dot" style="border-color:var(--cont)"></span>Model forecast</button>
           <button data-s="1,2" aria-pressed="true"><span class="sw box"></span>Interval (q10–q90)</button>
           <button data-s="5" aria-pressed="false"><span class="sw dash" style="border-color:var(--base)"></span>Climatology baseline</button>
         </div><span class="hint">drag to zoom · double-click to reset · scores follow the view</span></div>
@@ -256,7 +256,7 @@ async function renderLive(root) {
       <div class="grid2">
         <div class="card"><div class="card-head"><div><h2>Submission record</h2><p class="sub">One square per target day (${m.city}). Click a day to show it in the chart.</p></div></div>
           <div class="days" id="lv-days">${record.map(d => `<button class="day ${d.state}" data-k="${d.key}" title="${fmtDay(d.key)}: ${STATE[d.state]}">${+d.key.slice(8)}</button>`).join("")}</div>
-          <div class="legend"><span class="chip static"><b class="good">■</b> submitted · ${counts.sub}</span><span class="chip static">⋯ not confirmed · ${counts.cont}</span><span class="chip static">▨ missed · ${counts.miss}</span></div>
+          <div class="legend"><span class="chip static"><b class="good">■</b> submitted · ${counts.sub}</span><span class="chip static">⋯ not submitted · ${counts.cont}</span><span class="chip static">▨ missed · ${counts.miss}</span></div>
         </div>
         <div class="card"><div class="card-head"><div><h2>Model and inputs</h2><p class="sub">Latest run ${esc(T.last_run.slice(0, 16).replace("T", " "))} UTC · ${T.runs} run${T.runs === 1 ? "" : "s"} published</p></div><span class="pill ${T.env === "production" ? "" : "warn"}">${esc(T.env)}</span></div>
           <p><span class="mono">${esc(T.model)}</span>: t0-gamma (The Forecasting Company, Apache-2.0), zero-shot, 90 days of context, with covariates. D+2 to D+10 fall back to slot climatology. <a href="#backtest">Backtest results</a></p>
@@ -283,7 +283,7 @@ async function renderLive(root) {
         { stroke: css("--accent"), width: 1, dash: [2, 3], points: { show: false } },
         { stroke: css("--accent"), width: 1, dash: [2, 3], points: { show: false } },
         line("Submitted", css("--sub"), { width: 6 }),
-        line("Continuous", css("--cont"), { width: 2, dash: [2, 4], cap: "round" }),
+        line("Model", css("--cont"), { width: 2, dash: [2, 4], cap: "round" }),
         line("Climatology", css("--base"), { width: 1.5, dash: [6, 4] }),
         line("Observed", css("--obs"), { width: 2 }),
       ].map((s, i) => (i ? { ...s, show: shown[i] } : s)),
@@ -294,7 +294,7 @@ async function renderLive(root) {
         const rows = [], on = k => u.series[k].show;
         if (on(6) && T.obs[i] != null) rows.push([css("--obs"), "Observed", `${f1(T.obs[i])} ${unit}`]);
         if (on(3) && s50[i] != null) rows.push([css("--sub"), "Submitted", `${f1(s50[i])} ${unit}`]);
-        if (on(4) && T.q50[i] != null) rows.push([css("--cont"), "Continuous", `${f1(T.q50[i])} ${unit}`, true]);
+        if (on(4) && T.q50[i] != null) rows.push([css("--cont"), "Model", `${f1(T.q50[i])} ${unit}`, true]);
         if (on(1) && e10[i] != null) rows.push([css("--accent"), "q10–q90", `${f1(e10[i])} … ${f1(e90[i])}`]);
         if (on(5) && T.b50[i] != null) rows.push([css("--base"), "Climatology", `${f1(T.b50[i])} ${unit}`]);
         return rows.length ? ttHTML(fmtUTC(x[i]), rows) : null;
