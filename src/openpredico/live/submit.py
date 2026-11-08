@@ -99,6 +99,17 @@ def main(dry_run: bool, only: list[str] | None = None) -> None:
         print("coverage:", client.coverage())
 
 
+def in_session(now: pd.Timestamp) -> list[str]:
+    """Targets whose D+1 session is open now: the hour before their gate, local time."""
+    out = []
+    for name, t in load_targets().items():
+        local = now.tz_convert(t["timezone"])
+        gate = pd.Timestamp(f"{local:%Y-%m-%d} {t['gate']}").tz_localize(t["timezone"])
+        if gate - pd.Timedelta("1h") <= local < gate:
+            out.append(name)
+    return out
+
+
 def not_ready(client: Predico) -> list[str]:
     """Our targets with an open challenge that our forecasts don't fully cover yet."""
     ready = {c["challenge_id"]: c["ready"] for c in client.coverage()["data"]["coverage"]}

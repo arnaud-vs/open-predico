@@ -113,7 +113,7 @@ Rules enforced by the harness:
 ## Live operations
 
 - **Continuous submission only:** one forecast per day covering D+1 to D+10. Predico slices it at each gate closure. If a run fails, yesterday's forecast still covers tomorrow. D+1 comes from the live config (`t0gamma_cov_ctx90`: best Apache-2.0 model in the backtest, 2026-11-03), D+2 to D+10 from the slot-climatology baseline. EDP program pays D+1 only (Predico programs page, Nov 2026), so D+2 to D+10 exist only as a fallback.
-- **Scheduler: Modal** (`live/modal_app.py`, Starter plan). GitHub Actions cron was dropped (2026-11-05): scheduled runs started 5-7 h late. Times are Madrid local: `submit` at 16:15 (Spain), `submit_de` at 13:30 (50Hertz wind), `check` at 14:30, 14:45, 16:30 and 16:45 resubmits only the targets whose open challenge isn't `ready` in `market/session/coverage` (the session opens the hour before the 17:00 gate; `gate_closure` in the API is authoritative). Cost ~$0.5/month, inside the $1 free credit; check Modal's usage page. `publish` at 17:30 (all targets).
+- **Scheduler: Modal** (`live/modal_app.py`, Starter plan: 5 crons, $30/month free credit). GitHub Actions cron was dropped (2026-11-05): scheduled runs started 5-7 h late. Three crons serve every target, in Madrid time (Berlin shares the offsets): `submit` at 14:15 and 16:15 forecasts the targets whose session is open (`submit.in_session`: the hour before the gate, so Germany at 14:15 and Spain at 16:15); `check` at :30 and :45 of both hours resubmits only targets whose open challenge isn't `ready` in `market/session/coverage`; `publish` at 15:30 and 17:30 publishes everything gated and rebuilds the dashboard. `gate_closure` in the API is authoritative. Cost ~$0.65/month.
 - **Late features:** filled with NaN and recorded; the retry submits the full forecast if the data has arrived. The latest submission counts.
 - **`submit`:** build features → predict → validate (full grid, no NaN, sorted, ≤ 240 h) → submit → check coverage → save forecast and exact inputs to HF `live-private`. Never prints forecast values (logs may be shared; the repo is public).
 - **`publish`:** after gate closure, copy closed days to public HF `live`; fetch actuals and Predico's official scores for us; recompute scores until the month freezes (day 7 of the next month); fail if today's submission is missing.
@@ -141,8 +141,8 @@ its feature groups in `groups.toml`. Remaining Spain-specific code: `to_grid` (E
   No known-future weather input yet: 50Hertz's and ENTSO-E's D-1 wind forecasts are published at
   18:00, after the gate. Candidates: DWD ICON open data, German day-ahead price (`da_price_de`,
   ESIOS 600, if published before 13:30).
-- **Live:** `submit_de` at 13:30 local (before the 14:00-15:00 session), `check` shared with Spain
-  (14:30/14:45 and 16:30/16:45). Same model as Spain (t0-gamma + climatology fallback) until the
+- **Live:** `submit` at 14:15 (session 14:00-15:00), `check` at 14:30/14:45, `publish` at 15:30,
+  all crons shared with Spain. Same model as Spain (t0-gamma + climatology fallback) until the
   benchmark picks one. No ESIOS calls: ~92 daily 50Hertz requests, 2 s apart (~3 min).
 - **To do:** build `wind_50hertz` and `calendar_de` into the next benchmark version
   (`python -m openpredico.data.groups --groups wind_50hertz,calendar,calendar_de ...`; use the
