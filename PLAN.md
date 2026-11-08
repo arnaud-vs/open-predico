@@ -147,8 +147,15 @@ its feature groups in `groups.toml`. Remaining Spain-specific code: `to_grid` (E
   DATA_SOURCES.md for the availability evidence. Next: weather vintages closer to the origin
   (Open-Meteo `previous_day1` is issued too late for the evening hours; the Single Runs API
   could give the 00/06 UTC run of D-1).
-- **Live:** `submit` at 14:15 (session 14:00-15:00), `check` at 14:30/14:45, `publish` at 15:30,
-  all crons shared with Spain. Needs `ENTSOE_API_KEY` in the Modal secret.
+- **Backtest (2026-11-08, test year, ratio to `slot_climatology_28d`):** `t0gamma_cov_ctx90`
+  wind RMSE 0.41, Winkler 0.39, coverage 84% (climatology 73%); solar RMSE 0.48, Winkler 0.52,
+  coverage 90% (78%). The weather covariates carry it; ablations and the other TSFMs are next.
+- **Live:** same config as Spain (`t0gamma_cov_ctx90` D+1, climatology D+2..D+10). `submit` at
+  14:15 (session 14:00-15:00), `check` at 14:30/14:45, `publish` at 15:30, all crons shared with
+  Spain. Needs `ENTSOE_API_KEY` in the Modal secret, and Open-Meteo's commercial licence before
+  production. Risk: ESIOS published the DE-LU/BE/NL prices between 13:15 and 14:05 on
+  2026-11-08, close to the 14:15 run; if they arrive late the run logs them as late (NaN). Switch
+  `da_price_de` to ENTSO-E A44 (out by 13:16) if that happens.
 
 ## Predico rules that shape the repo
 
@@ -159,10 +166,11 @@ its feature groups in `groups.toml`. Remaining Spain-specific code: `to_grid` (E
 
 ## Dashboard
 
-Hugging Face Space (`open-predico/dashboard`), a free static Space: `index.html` + `app.js` (uPlot, no framework) draw JSON that `dashboard/build.py` precomputes from the HF datasets (2026-11-05: replaced the stlite/Streamlit app, which was slow). Gridual palette. A target selector at the top; targets other than Spain mFRR show "coming soon". Tabs:
+Hugging Face Space (`open-predico/dashboard`), a free static Space: `index.html` + `app.js` (uPlot, no framework) draw JSON that `dashboard/build.py` precomputes from the HF datasets (2026-11-05: replaced the stlite/Streamlit app, which was slow). Gridual palette. A market selector at the top: Spain mFRR, Germany wind and Germany solar (50Hertz) have every tab; Belgium shows "coming soon". Tabs:
 
 - **Backtest:** configs discovered from `predictions/backtest/*/` on HF. Leaderboard modelled on GIFT-Eval: one row per config with type (baseline / foundation model / ML), RMSE and Winkler per target normalised to `slot_climatology_28d` (ratio of mean daily scores on common days), coverage, aggregate score (geometric mean of the normalised scores) and rank. Win-rate matrix per metric (share of common days where A beats B), errors by month/hour/weekday, day viewer.
-- **Target data:** `v1/target.parquet` explored: time series (daily or 15-min window), patterns by quarter-hour/weekday/month, distribution, missing values and zeros per day, price vs energy.
+- **Target data:** the target columns (`v1/target.parquet`, `v2/target_50hertz.parquet`) explored: time series (daily or 15-min window), patterns by quarter-hour/weekday/month, distribution, missing values and zeros per day, price vs energy (Spain).
+- **Input features:** Spain: the ESIOS catalog. Germany: the feature columns of `groups.toml` with source, availability and a description.
 - **Live:** from HF `live` (written by `live/publish.py` at 17:30 Madrid, after the gate): continuous forecast dotted, days Predico confirmed as submitted solid underneath, actuals, submission record per day, scores vs the same-run climatology baseline, model and input features. Later: Predico's official score, rank if Predico allows publishing it.
 
 ## Repo meta

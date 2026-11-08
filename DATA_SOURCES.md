@@ -34,7 +34,10 @@ deadlines and one check on 2026-11-08 (`D+1` = 9 Nov): A65 day-ahead load is due
 was out at 10:12 (not yet at 08:24), so `future`. A69 day-ahead wind/solar is due by 18:00 D-1,
 after the 15:00 gate, and was not out at 10:12, so `past` only. ENTSO-E does not expose
 publication times, so these are deadlines plus spot checks, not a vintage record; the live run's
-stored inputs are.
+stored inputs are. The German live run also reads `da_market` from ESIOS (indicator 600): on
+2026-11-08 the Iberian and French prices for D+1 were there at 13:15 but DE-LU, BE and NL only by
+14:05, ten minutes before the 14:15 run (ENTSO-E A44 had DE-LU at 13:16: the fallback if ESIOS
+turns out late).
 
 ## Open-Meteo
 
