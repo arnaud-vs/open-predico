@@ -28,7 +28,7 @@ def test_forecast_generation_sees_own_groups_and_is_clipped():
     now = pd.Timestamp("2026-11-07 12:30", tz="UTC")
     idx = pd.date_range("2026-09-01", "2026-11-09", freq="15min", tz="UTC", inclusive="left")
     frames = {
-        "wind_50hertz": pd.DataFrame({"wind_50hertz": 5.0, "wind_50hertz_onshore": 4.0}, index=idx),
+        "target_50hertz": pd.DataFrame({"wind_50hertz": 5.0, "solar_50hertz": 4.0}, index=idx),
         "calendar_de": pd.DataFrame({"holiday_de": 0.0}, index=idx),
         "target": pd.DataFrame({"mfrr_energy": 1.0}, index=idx),  # Spain's: must be ignored
     }
@@ -41,5 +41,5 @@ def test_forecast_generation_sees_own_groups_and_is_clipped():
 
     fc, _ = forecast("germany_wind_50hertz_ca", frames, predict, now)
     validate(fc, now)
-    assert seen == {"past": ["wind_50hertz", "wind_50hertz_onshore"], "future": ["holiday_de"]}
-    assert fc.q10.min() == 0 and fc.q90.max() == 26000  # clipped to [0, capacity]
+    assert seen == {"past": ["wind_50hertz", "solar_50hertz"], "future": ["holiday_de"]}
+    assert fc.q10.min() == 0 and fc.q90.max() == 24500  # clipped to [0, capacity]

@@ -33,7 +33,6 @@ def build_frames(now: pd.Timestamp, groups: list[str], tz: str) -> dict[str, pd.
     end = (local.normalize() + pd.DateOffset(days=2)).tz_convert("UTC")
     start, end = start.tz_localize(None).isoformat(), end.tz_localize(None).isoformat()
     # ponytail: ~30 ESIOS ids x 4 monthly chunks at 1 req/s, refetched daily; cache on HF if slow
-    # ponytail: 50Hertz: one request per local day, 2 s apart (~3 min for 92 days)
     return {g: build(g, start, end, tz) for g in groups}
 
 

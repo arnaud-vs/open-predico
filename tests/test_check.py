@@ -25,6 +25,7 @@ def test_in_session_is_the_hour_before_each_gate():
     def at(hm):
         return in_session(pd.Timestamp(f"2026-11-09 {hm}", tz="Europe/Madrid"))
 
-    assert at("14:15") == ["germany_wind_50hertz_ca"]  # gate 15:00 Berlin = 15:00 Madrid
+    # gate 15:00 Berlin = 15:00 Madrid
+    assert at("14:15") == ["germany_wind_50hertz_ca", "germany_solar_50hertz_ca"]
     assert set(at("16:15")) == {"spain_mfrr_energy", "spain_mfrr_price"}
     assert at("17:00") == [] and at("13:59") == []

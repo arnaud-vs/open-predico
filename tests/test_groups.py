@@ -18,7 +18,7 @@ def test_repo_groups_are_valid():
     "toml, error",
     [
         ('[a]\nx = { source = "esios:1", availability = "later" }\n', "availability"),
-        ('[a]\nx = { source = "entsoe:1", availability = "past" }\n', "prefix"),
+        ('[a]\nx = { source = "foo:1", availability = "past" }\n', "prefix"),
         (
             '[a]\nx = { source = "esios:1", availability = "past" }\n'
             '[b]\nx = { source = "esios:2", availability = "past" }\n',

@@ -1,7 +1,7 @@
 """Build feature groups (configs/groups.toml) on the 15-min UTC grid.
 
 Benchmark build: python -m openpredico.data.groups --start 2024-12-10 --end 2026-11-01 --version v1
-    [--groups wind_50hertz,calendar_de]
+    [--groups target_50hertz,calendar_de]
 """
 
 import argparse
@@ -13,12 +13,12 @@ import pandas as pd
 from dateutil.easter import easter
 
 from openpredico.config import CONFIGS, load_targets
-from openpredico.data import entsoe_bids, esios, fiftyhertz, hf
+from openpredico.data import entsoe, entsoe_bids, esios, hf
 
 TZ = "Europe/Madrid"  # ESIOS local time; calendar default (Spain's targets)
 COLUMN_KEYS = {"source", "geo", "fill", "availability"}
 AVAILABILITY = {"future", "past"}
-PREFIXES = {"esios", "calendar", "entsoe_bids", "fiftyhertz"}
+PREFIXES = {"esios", "calendar", "entsoe_bids", "entsoe"}
 # ponytail: bid ladder built locally by `entsoe_bids ladder` (File Library login needed), not
 # fetched here. Put it at this path before building the `mfrr_bids` group.
 BIDS_LADDER = CONFIGS.parent / "data" / "bids_ladder.parquet"
@@ -37,12 +37,6 @@ def load_groups(path: Path = CONFIGS / "groups.toml") -> dict[str, dict]:
                 raise ValueError(f"{where}: availability must be one of {sorted(AVAILABILITY)}")
             if c["source"].split(":")[0] not in PREFIXES:
                 raise ValueError(f"{where}: source prefix must be one of {sorted(PREFIXES)}")
-            if c["source"].startswith("fiftyhertz:"):
-                kind, _ = fiftyhertz.source_key(c["source"].split(":", 1)[1])
-                if "geo" in c or "fill" in c:
-                    raise ValueError(f"{where}: 50Hertz has a fixed area; filling is not allowed")
-                if kind == "forecast" and c["availability"] == "future":
-                    raise ValueError(f"{where}: 18:00 forecast publication is after the 15:00 gate")
             if name in seen_columns:
                 raise ValueError(f"{where}: duplicate column name")
             source = (c["source"], c.get("geo"))
@@ -71,12 +65,8 @@ def build(group: str, start: str, end: str, tz: str = TZ) -> pd.DataFrame:
         if prefix == "entsoe_bids":
             df[name] = entsoe_bids.to_series(key, BIDS_LADDER).reindex(grid)
             continue
-        if prefix == "fiftyhertz":
-            kind, component = fiftyhertz.source_key(key)
-            cache_key = (prefix, kind)
-            if cache_key not in raw:
-                raw[cache_key] = fiftyhertz.fetch_frame(kind, start, end)
-            df[name] = raw[cache_key][component].reindex(grid)
+        if prefix == "entsoe":
+            df[name] = entsoe.fetch(key, start, end)  # already on the grid
             continue
         if key not in raw:
             raw[key] = esios.fetch_values(int(key), start, end)
@@ -87,13 +77,12 @@ def build(group: str, start: str, end: str, tz: str = TZ) -> pd.DataFrame:
 
 
 def fetch_source(source: str, start: str, end: str) -> pd.Series:
-    """One `esios:<id>` or `fiftyhertz:<key>` series over UTC [start, end), native resolution."""
+    """One `esios:<id>` or `entsoe:<key>` series over UTC [start, end), native resolution."""
     prefix, key = source.split(":")
     if prefix == "esios":
         return esios.fetch(int(key), start, end)
-    if prefix == "fiftyhertz":
-        # ponytail: one request per local day, 2 s apart; fine for a few months of truth
-        return fiftyhertz.fetch(key, start, end)
+    if prefix == "entsoe":
+        return entsoe.fetch(key, start, end)
     raise ValueError(f"no fetcher for source {source!r}")
 
 

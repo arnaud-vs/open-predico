@@ -7,7 +7,7 @@ This document records the decisions made before coding and why. Change it via PR
 ## Scope
 
 - **Launch target:** Spain mFRR (EDP program) — `spain_mfrr_energy` (MWh, signed) and `spain_mfrr_price` (EUR/MWh, ~7% exact zeros, almost all in quarter-hours with net downward activation). Day-ahead, 15-min resolution, gate closure 17:00 CET D-1. Ground truth: ESIOS indicators 10250 and 2197.
-- **Next:** 50Hertz wind (`germany_wind_50hertz_ca`, gate 15:00 CET D-1): wired, benchmark pending (see Adding a target). More targets are configuration, not code.
+- **Next:** 50Hertz wind and solar (`germany_wind_50hertz_ca`, `germany_solar_50hertz_ca`, gate 15:00 CET D-1; see Adding a target). More targets are configuration, not code.
 - **Main forecasting engines:** time-series foundation models (TSFMs). ML models (LightGBM) and simple baselines are benchmarked alongside.
 - No public benchmark exists for Spanish mFRR. Building one is part of the goal.
 
@@ -118,7 +118,7 @@ Rules enforced by the harness:
 - **`submit`:** build features → predict → validate (full grid, no NaN, sorted, ≤ 240 h) → submit → check coverage → save forecast and exact inputs to HF `live-private`. Never prints forecast values (logs may be shared; the repo is public).
 - **`publish`:** after gate closure, copy closed days to public HF `live`; fetch actuals and Predico's official scores for us; recompute scores until the month freezes (day 7 of the next month); fail if today's submission is missing.
 - **Monitoring:** Modal failure alerts (enable in workspace settings) plus the `publish` check (which catches skipped runs).
-- **Secrets:** Modal secret `open-predico`: `HF_TOKEN` (fine-grained, org-scoped), `ESIOS_TOKEN`, `PREDICO_EMAIL`, `PREDICO_PASSWORD`, `PREDICO_PLAYGROUND_URL` and `PREDICO_URL` (scheme optional). `URL_VAR` in `live/predico.py` picks one: the playground until production unlocks.
+- **Secrets:** Modal secret `open-predico`: `HF_TOKEN` (fine-grained, org-scoped), `ESIOS_TOKEN`, `ENTSOE_API_KEY` (German targets), `PREDICO_EMAIL`, `PREDICO_PASSWORD`, `PREDICO_PLAYGROUND_URL` and `PREDICO_URL` (scheme optional). `URL_VAR` in `live/predico.py` picks one: the playground until production unlocks.
 - **Before go-live:** dry run on the Predico playground; historical forecast export from the backtest if required.
 - **Playground:** production unlocks after 5 days of good playground predictions, so the live record starts on the playground. Every run is stored and published with `env` = `playground` or `production`. Both Spain resources and `germany_wind_50hertz_ca` exist there (checked 2026-11-03). Auth: access token ~1 h, refresh 24 h, no long-lived API key, so the password stays a secret.
 
@@ -129,26 +129,20 @@ its feature groups in `groups.toml`. Remaining Spain-specific code: `to_grid` (E
 15-min switch at Madrid midnight), the mFRR zero fill in `experiment.features`, the single
 `PUBLICATION_LAG`, and the Modal crons in `modal_app.py` (one per gate time; Starter allows 5).
 
-### 50Hertz wind (`germany_wind_50hertz_ca`), wired 2026-11-08
+### 50Hertz wind and solar (`germany_wind_50hertz_ca`, `germany_solar_50hertz_ca`)
 
-- **Truth:** 50Hertz onshore + offshore actuals (`fiftyhertz:actual_sum`, `data/fiftyhertz.py`).
-  Predico scores against ENTSO-E A75 B18 + B19 in `10YDE-VE-------2`, each series carried forward
-  before summing, re-imported over a rolling 35 days (Predico 50Hertz program page). Parity with
-  50Hertz's own figures is unverified: compare with Predico's raw-data endpoint
-  (`data/raw-measurements/`, needs the maintainer's login) before trusting live scores.
-- **Features:** `wind_50hertz` (past actuals; ~25 min publication lag observed), `calendar`
-  (shared, built in Europe/Berlin; `holiday_es` comes along) and `calendar_de` (`holiday_de`).
-  No known-future weather input yet: 50Hertz's and ENTSO-E's D-1 wind forecasts are published at
-  18:00, after the gate. Candidates: DWD ICON open data, German day-ahead price (`da_price_de`,
-  ESIOS 600, if published before 13:30).
+- **Truth:** exactly Predico's: ENTSO-E A75 in `10YDE-VE-------2`, B18 + B19 for wind, B16 for
+  solar, each series carried forward on the 15-min grid (curve type A03) before summing
+  (`entsoe:` sources, `data/entsoe.py`, DATA_SOURCES.md). ENTSO-E revises it over 35 days.
+  The 50Hertz website connector was dropped (2026-11-08): same data, not the scored series.
+- **Origin:** 14:00 Berlin, like Spain's 14:00 Madrid; the live run is at 14:15.
+- **Capacity:** ENTSO-E A68 installed capacity for 2026 (wind 24.5 GW, solar 25.2 GW); only
+  used to clip, the 2025-26 maxima are ~17 GW and ~15 GW.
+- **Features:** `target_50hertz` (both targets and the wind components, past; A75 shows up
+  ~25-40 min after real time), `calendar` (shared, built in Europe/Berlin; `holiday_es` comes
+  along) and `calendar_de` (`holiday_de`).
 - **Live:** `submit` at 14:15 (session 14:00-15:00), `check` at 14:30/14:45, `publish` at 15:30,
-  all crons shared with Spain. Same model as Spain (t0-gamma + climatology fallback) until the
-  benchmark picks one. No ESIOS calls: ~92 daily 50Hertz requests, 2 s apart (~3 min).
-- **To do:** build `wind_50hertz` and `calendar_de` into the next benchmark version
-  (`python -m openpredico.data.groups --groups wind_50hertz,calendar,calendar_de ...`; use the
-  50Hertz annual downloads for the multi-year backfill, the daily fetcher is slow), remove them
-  from `NOT_IN_V1`, backtest the baseline and the TSFMs, pick the live config, check the capacity
-  (26 GW, approximate), then a playground run.
+  all crons shared with Spain. Needs `ENTSOE_API_KEY` in the Modal secret.
 
 ## Predico rules that shape the repo
 

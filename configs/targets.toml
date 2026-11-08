@@ -2,7 +2,8 @@
 #
 # kind:   "market"     -> no clipping, values may be negative
 #         "generation" -> clipped to [0, capacity]
-# origin: local time on D-1 when the forecast is made (the live run is later, 16:15 Madrid)
+# origin: local time on D-1 when the forecast is made (the live run is later: 14:15 for a
+#         15:00 gate, 16:15 for 17:00; live/modal_app.py)
 # gate:   local time on D-1 when Predico closes the D+1 session
 # column: the target's column in `groups`, whose source is `truth`
 # groups: feature groups (configs/groups.toml) the target's models see
@@ -34,15 +35,28 @@ test_period = ["2025-11-01", "2026-10-31"]
 [germany_wind_50hertz_ca]
 predico_resource = "germany_wind_50hertz_ca"
 # Predico's truth: ENTSO-E A75 B18 + B19 (offshore + onshore), 10YDE-VE-------2, each series
-# carried forward before summing. 50Hertz's own onshore + offshore should match: unverified.
-truth = "fiftyhertz:actual_sum"
+# carried forward before summing (data/entsoe.py)
+truth = "entsoe:A75_B18+B19"
 column = "wind_50hertz"
 # holiday_es comes along with the shared calendar group (v1 layout); ablate with `drop`
-groups = ["wind_50hertz", "calendar", "calendar_de"]
+groups = ["target_50hertz", "calendar", "calendar_de"]
 unit = "MW"
 kind = "generation"
-capacity = 26000  # ponytail: approx. installed onshore + offshore in the area (2026)
+capacity = 24500  # ponytail: ENTSO-E A68 installed capacity for 2026 (1828 + 22629 MW)
 timezone = "Europe/Berlin"
-origin = "13:00"  # live run at 13:30, before the 14:00 session
+origin = "14:00"
+gate = "15:00"
+test_period = ["2025-11-01", "2026-10-31"]
+
+[germany_solar_50hertz_ca]
+predico_resource = "germany_solar_50hertz_ca"
+truth = "entsoe:A75_B16"  # Predico's truth: ENTSO-E A75 B16, 10YDE-VE-------2
+column = "solar_50hertz"
+groups = ["target_50hertz", "calendar", "calendar_de"]
+unit = "MW"
+kind = "generation"
+capacity = 25300  # ponytail: ENTSO-E A68 installed capacity for 2026 (25235 MW)
+timezone = "Europe/Berlin"
+origin = "14:00"
 gate = "15:00"
 test_period = ["2025-11-01", "2026-10-31"]

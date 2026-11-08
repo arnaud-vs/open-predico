@@ -3,8 +3,9 @@
 Deploy:  uv run --with modal modal deploy src/openpredico/live/modal_app.py
 Once:    uv run --with modal modal run src/openpredico/live/modal_app.py::submit
          (or ::check, ::publish); submit acts only on targets whose session is open
-Secrets: Modal secret `open-predico` with ESIOS_TOKEN, HF_TOKEN, PREDICO_EMAIL, PREDICO_PASSWORD
-         PREDICO_PLAYGROUND_URL and PREDICO_URL (live/predico.py URL_VAR picks one). See PLAN.md.
+Secrets: Modal secret `open-predico` with ESIOS_TOKEN, ENTSOE_API_KEY, HF_TOKEN, PREDICO_EMAIL,
+         PREDICO_PASSWORD, PREDICO_PLAYGROUND_URL and PREDICO_URL (live/predico.py URL_VAR picks
+         one). See PLAN.md.
 """
 
 import modal
