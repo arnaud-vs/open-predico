@@ -33,3 +33,10 @@ def test_a03_carry_forward_per_series_then_sum(monkeypatch):
     assert b18.iloc[16:].isna().all()  # nothing published after 04:00: stays NaN
     wind = entsoe.fetch("A75_B18+B19", "2026-01-01", "2026-01-01 05:00")
     assert list(wind.iloc[:4]) == [11, 11, 11, 12] and wind.iloc[4:].isna().all()
+
+
+def test_fetch_empty_range_needs_no_request():
+    from openpredico.data import entsoe
+
+    s = entsoe.fetch("A75_B18+B19", "2026-11-10", "2026-11-09")  # publish before D+1 starts
+    assert s.empty

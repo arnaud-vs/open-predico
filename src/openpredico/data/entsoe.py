@@ -28,6 +28,7 @@ DOMAIN = {"A75": "in_Domain", "A69": "in_Domain", "A65": "outBiddingZone_Domain"
 CHUNK = pd.DateOffset(years=1)  # the API's longest range per request
 MIN_INTERVAL = 2.0  # seconds between requests (ENTSO-E rate limit)
 STEP = pd.Timedelta("15min")
+RETRY_WAITS = (10, 30, 60, 0)  # seconds after each failed try; four tries, the last not waited
 
 _last = 0.0
 
@@ -49,6 +50,8 @@ def _fetch_psr(document: str, psr: str | None, start: pd.Timestamp, end: pd.Time
     while t < end:
         parts.append(parse(_get(document, psr, t, min(t + CHUNK, end))))
         t += CHUNK
+    if not parts:  # empty range, e.g. truth for days that haven't started
+        return pd.Series(dtype=float)
     s = pd.concat(parts).sort_index()
     s = s[~s.index.duplicated(keep="last")]  # chunk edges may overlap
     if s.empty:
@@ -71,7 +74,12 @@ def _get(document: str, psr: str | None, start: pd.Timestamp, end: pd.Timestamp)
     }
     if psr:
         params["psrType"] = psr
-    resp = requests.get(BASE_URL, params=params, timeout=300)
+    for wait in RETRY_WAITS:  # 5xx (599 on 2026-11-09) and 429 are transient on ENTSO-E's side
+        resp = requests.get(BASE_URL, params=params, timeout=300)
+        if resp.status_code < 500 and resp.status_code != 429:
+            break
+        time.sleep(wait)
+        _last = time.time()
     if resp.status_code == 400 and b"No matching data" in resp.content:
         return b"<x/>"  # nothing published in this range
     if not resp.ok:  # not raise_for_status: its message carries the URL, so the key
