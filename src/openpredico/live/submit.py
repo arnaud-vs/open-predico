@@ -10,6 +10,7 @@ import sys
 from collections.abc import Callable
 
 import pandas as pd
+from huggingface_hub import HfApi
 
 from openpredico.config import load_targets
 from openpredico.data import hf
@@ -157,18 +158,35 @@ def not_ready(client: Predico) -> list[str]:
     ]
 
 
+def not_run(now: pd.Timestamp, files: list[str]) -> list[str]:
+    """Targets in session without a live run archived today (`files`: live-private paths).
+
+    Predico's coverage can't tell: yesterday's climatology D+2 already covers today's challenge.
+    """
+    return [
+        n
+        for n in in_session(now)
+        if not any(f.startswith(f"forecasts/{n}/{now:%Y-%m-%d}T") for f in files)
+    ]
+
+
+def missing(client: Predico, now: pd.Timestamp) -> list[str]:
+    """Targets to resubmit: not covered on Predico, or no t0 run of ours today."""
+    by_resource = {t["predico_resource"]: n for n, t in load_targets().items()}
+    files = HfApi().list_repo_files(f"{hf.ORG}/live-private", repo_type="dataset")
+    return sorted({by_resource[r] for r in not_ready(client)} | set(not_run(now, files)))
+
+
 def check_and_retry() -> None:
-    """Run in each open session before the gate: resubmit if an open challenge isn't covered."""
-    missing = not_ready(Predico())
-    print(f"not ready: {missing}")
-    if not missing:
-        return  # covered, or no session of ours open right now
-    main(
-        dry_run=False,
-        only=[n for n, t in load_targets().items() if t["predico_resource"] in missing],
-    )
-    if missing := not_ready(Predico()):
-        sys.exit(f"still not ready after resubmit: {missing}")
+    """Run in each open session before the gate: resubmit targets that `missing` lists."""
+    now = pd.Timestamp.now(tz="UTC")
+    todo = missing(Predico(), now)
+    print(f"missing: {todo}")
+    if not todo:
+        return  # done, or no session of ours open right now
+    main(dry_run=False, only=todo)
+    if todo := missing(Predico(), pd.Timestamp.now(tz="UTC")):
+        sys.exit(f"still missing after resubmit: {todo}")
 
 
 if __name__ == "__main__":
