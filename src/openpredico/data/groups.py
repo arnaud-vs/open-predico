@@ -47,39 +47,54 @@ def load_groups(path: Path = CONFIGS / "groups.toml") -> dict[str, dict]:
     return groups
 
 
-def build(group: str, start: str, end: str, tz: str = TZ) -> pd.DataFrame:
+def build(group: str, start: str, end: str, tz: str = TZ, lenient: bool = False) -> pd.DataFrame:
     """One group's columns on the 15-min UTC grid [start, end), with `fill` applied.
 
-    `tz`: the target's time zone, for `calendar:` columns.
+    `tz`: the target's time zone, for `calendar:` columns. `lenient` (live runs): a column whose
+    source fails is left out instead of failing the build; TSFMs take any covariate set.
     """
     start, end = pd.Timestamp(start, tz="UTC"), pd.Timestamp(end, tz="UTC")
     grid = pd.date_range(start, end, freq="15min", inclusive="left", name="time")
     columns = load_groups()[group]
-    raw = {}  # one fetch per ESIOS id (shared by its geos) or Open-Meteo area
+    raw = {}  # one fetch per ESIOS id (shared by its geos) or Open-Meteo area, failures included
     df = pd.DataFrame(index=grid)
     for name, c in columns.items():
-        prefix, key = c["source"].split(":")
-        if prefix == "calendar":
-            df[name] = CALENDAR[key](grid, tz)
-            continue
-        if prefix == "entsoe_bids":
-            df[name] = entsoe_bids.to_series(key, BIDS_LADDER).reindex(grid)
-            continue
-        if prefix == "entsoe":
-            df[name] = entsoe.fetch(key, start, end)  # already on the grid
-            continue
-        if prefix == "openmeteo":
-            area, variable = key.split(".")
-            if prefix not in raw:  # one request per day for every area and variable
-                raw[prefix] = openmeteo.fetch(start, end)
-            df[name] = raw[prefix][area][variable]
-            continue
-        if key not in raw:
-            raw[key] = esios.fetch_values(int(key), start, end)
-        s = esios.to_series(raw[key], int(key), c.get("geo"), start, end)
-        df[name] = to_grid(s, grid)
-    fills = {name: c["fill"] for name, c in columns.items() if "fill" in c}
+        try:
+            df[name] = _column(c, raw, grid, start, end, tz)
+        except Exception as e:
+            if not lenient:
+                raise
+            print(f"{group}.{name}: left out, source failed ({type(e).__name__})")  # no URL
+    fills = {name: c["fill"] for name, c in columns.items() if name in df and "fill" in c}
     return df.fillna(fills)
+
+
+def _column(c: dict, raw: dict, grid: pd.DatetimeIndex, start, end, tz: str) -> pd.Series:
+    prefix, key = c["source"].split(":")
+    if prefix == "calendar":
+        return CALENDAR[key](grid, tz)
+    if prefix == "entsoe_bids":
+        return entsoe_bids.to_series(key, BIDS_LADDER).reindex(grid)
+    if prefix == "entsoe":
+        return entsoe.fetch(key, start, end)  # already on the grid
+    if prefix == "openmeteo":
+        area, variable = key.split(".")
+        # one request per day for every area and variable
+        return _once(raw, prefix, lambda: openmeteo.fetch(start, end))[area][variable]
+    values = _once(raw, key, lambda: esios.fetch_values(int(key), start, end))
+    return to_grid(esios.to_series(values, int(key), c.get("geo"), start, end), grid)
+
+
+def _once(raw: dict, key: str, fetch):
+    """`fetch()` once per key; a failure is remembered so other columns don't refetch it."""
+    if key not in raw:
+        try:
+            raw[key] = fetch()
+        except Exception as e:
+            raw[key] = e
+    if isinstance(raw[key], Exception):
+        raise raw[key]
+    return raw[key]
 
 
 def fetch_source(source: str, start: str, end: str) -> pd.Series:

@@ -43,7 +43,6 @@ groups = [
     "target_50hertz",
     "entsoe_forecasts_50hertz",
     "weather_50hertz",
-    "da_market",  # DE-LU and neighbours, SDAC results ~13:00 D-1
     "calendar",
     "calendar_de",
 ]
@@ -63,7 +62,6 @@ groups = [
     "target_50hertz",
     "entsoe_forecasts_50hertz",
     "weather_50hertz",
-    "da_market",  # DE-LU and neighbours, SDAC results ~13:00 D-1
     "calendar",
     "calendar_de",
 ]

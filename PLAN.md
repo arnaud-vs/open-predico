@@ -114,7 +114,7 @@ Rules enforced by the harness:
 
 - **Continuous submission only:** one forecast per day covering D+1 to D+10. Predico slices it at each gate closure. If a run fails, yesterday's forecast still covers tomorrow. D+1 comes from the live config (`t0gamma_cov_ctx90`: best Apache-2.0 model in the backtest, 2026-11-03), D+2 to D+10 from the slot-climatology baseline. EDP program pays D+1 only (Predico programs page, Nov 2026), so D+2 to D+10 exist only as a fallback. The fallback is not harmless: on 2026-11-08 the run crashed (HF 429 before submitting) and Predico scored the previous day's climatology D+2 as our D+1. Next: backtest t0 at a D+2 origin (14:00 on D-2) and use it for the tail if it beats climatology there.
 - **Scheduler: Modal** (`live/modal_app.py`, Starter plan: 5 crons, $30/month free credit). GitHub Actions cron was dropped (2026-11-05): scheduled runs started 5-7 h late. Three crons serve every target, in Madrid time (Berlin shares the offsets): `submit` at 14:15 and 16:15 forecasts the targets whose session is open (`submit.in_session`: the hour before the gate, so Germany at 14:15 and Spain at 16:15); `check` at :30 and :45 of both hours resubmits only targets whose open challenge isn't `ready` in `market/session/coverage` or that have no t0 run archived in `live-private` today (`submit.missing`; coverage alone counts yesterday's climatology tail as ready); `publish` at 15:30 and 17:30 publishes everything gated and rebuilds the dashboard. `gate_closure` in the API is authoritative. Cost ~$0.65/month.
-- **Late features:** filled with NaN and recorded; the retry submits the full forecast if the data has arrived. The latest submission counts.
+- **Late or failed features:** left out of the live run (`groups.build(lenient=True)`; known-future columns with gaps on D+1 are dropped in `submit.forecast`), names logged. TSFMs take any covariate set; only the target's own history is required. The latest submission counts.
 - **`submit`:** build features → predict → validate (full grid, no NaN, sorted, ≤ 240 h) → submit → save forecast and exact inputs to HF `live-private`. Never prints forecast values (logs may be shared; the repo is public).
 - **`publish`:** after gate closure, copy closed days to public HF `live`; fetch actuals and Predico's official scores for us; recompute scores until the month freezes (day 7 of the next month); fail if today's submission is missing.
 - **Monitoring:** Modal failure alerts (enable in workspace settings) plus the `publish` check (which catches skipped runs).
@@ -141,12 +141,10 @@ its feature groups in `groups.toml`. Remaining Spain-specific code: `to_grid` (E
 - **Features:** `target_50hertz` (both targets and the wind components, past; A75 shows up
   ~25-40 min after real time), `entsoe_forecasts_50hertz` (A65 day-ahead load: future, due
   10:00 D-1; A69 day-ahead wind/solar: past, due 18:00 D-1, after the gate), `weather_50hertz`
-  (Open-Meteo forecasts issued 48 h ahead, area means: future), `da_market` (v1's day-ahead
-  prices incl. DE-LU, SDAC results ~13:00 D-1: future), `calendar` (shared, built in
-  Europe/Berlin; `holiday_es` comes along) and `calendar_de` (`holiday_de`). See
-  DATA_SOURCES.md for the availability evidence. Next: weather vintages closer to the origin
-  (Open-Meteo `previous_day1` is issued too late for the evening hours; the Single Runs API
-  could give the 00/06 UTC run of D-1).
+  (Open-Meteo ECMWF IFS, 00 UTC run of D-1, area means: future), `calendar` (shared, built in
+  Europe/Berlin; `holiday_es` comes along) and `calendar_de` (`holiday_de`). `da_market` was
+  dropped (2026-11-09): it is Spain's group (ES/PT/FR prices, REE forecasts) and the DE price
+  only lands on ESIOS ~14:05. See DATA_SOURCES.md for the availability evidence.
 - **Backtest (2026-11-08, test year, ratio to `slot_climatology_28d`):** `t0gamma_cov_ctx90`
   wind RMSE 0.41, Winkler 0.39, coverage 84% (climatology 73%); solar RMSE 0.48, Winkler 0.52,
   coverage 90% (78%). The weather covariates carry it; ablations and the other TSFMs are next.

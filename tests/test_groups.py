@@ -75,3 +75,30 @@ def test_holiday_de_uses_berlin_dates():
         utc=True,
     )  # Ascension, Whit Monday, 3 Oct 00:30 Berlin (German Unity), 12 Oct (Spanish only)
     assert list(holiday_de(days)) == [1, 1, 1, 0]
+
+
+def test_lenient_build_leaves_out_failed_sources_and_fetches_once(monkeypatch):
+    from openpredico.data import groups
+
+    calls = []
+
+    def down(*args):
+        calls.append(args)
+        raise ConnectionError("ESIOS down")
+
+    monkeypatch.setattr(groups.esios, "fetch_values", down)
+    monkeypatch.setattr(
+        groups,
+        "load_groups",
+        lambda: {
+            "g": {
+                "price_es": {"source": "esios:600", "geo": 3},
+                "price_pt": {"source": "esios:600", "geo": 1},
+                "weekday": {"source": "calendar:weekday"},
+            }
+        },
+    )
+    df = groups.build("g", "2026-11-09", "2026-11-10", lenient=True)
+    assert list(df) == ["weekday"] and len(calls) == 1  # one fetch for both geos
+    with pytest.raises(ConnectionError):
+        groups.build("g", "2026-11-09", "2026-11-10")  # backtests stay strict

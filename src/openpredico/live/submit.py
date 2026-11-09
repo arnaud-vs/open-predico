@@ -37,7 +37,7 @@ def build_frames(
     end = (local.normalize() + pd.DateOffset(days=2)).tz_convert("UTC")
     start, end = start.tz_localize(None).isoformat(), end.tz_localize(None).isoformat()
     # ponytail: ~30 ESIOS ids x 4 monthly chunks at 1 req/s, refetched daily; cache on HF if slow
-    return {g: build(g, start, end, tz) for g in groups}
+    return {g: build(g, start, end, tz, lenient=True) for g in groups}
 
 
 def forecast(
@@ -55,8 +55,10 @@ def forecast(
     past = history[history.index < now - PUBLICATION_LAG]
     future = history.loc[history.index < stop, future_cols]
     late = [c for c in future_cols if future.loc[future.index >= days[0], c].isna().any()]
-    if late:
-        print(f"{target}: known-future columns with gaps on D+1: {late}")  # names only
+    if late:  # left out rather than filled: TSFMs take any covariate set
+        print(f"{target}: left out, known-future columns with gaps on D+1: {late}")  # names
+        future_cols = [c for c in future_cols if c not in late]
+        future, past = future[future_cols], past.drop(columns=late)
     past = past.drop(columns=future_cols)
     d1 = predict(past, future, days[:1])
     rest = slot_climatology(past.iloc[:, 0], days[1:], tz=tz)  # D+2..D+10: unpaid fallback
