@@ -91,12 +91,13 @@ def main(dry_run: bool, only: list[str] | None = None) -> None:
         print(f"{name}: {len(fc)} steps {fc.index.min()} .. {fc.index.max()}")  # no values
         if dry_run:
             continue
+        # Predico first: an HF outage (429 on 2026-11-08) must not block the submission.
+        client.submit_continuous(client.resource_id(target["predico_resource"]), fc)
+        print(f"{name}: submitted")
         env = "playground" if "playground" in client.api else "production"
         run = f"{name}/{now:%Y-%m-%dT%H%MZ}"
         hf.upload(fc.assign(env=env), "live-private", f"forecasts/{run}.parquet", f"Forecast {run}")
         hf.upload(inputs, "live-private", f"inputs/{run}.parquet", f"Inputs {run}")
-        client.submit_continuous(client.resource_id(target["predico_resource"]), fc)
-        print(f"{name}: submitted")
     if client:
         print("coverage:", client.coverage())
 
