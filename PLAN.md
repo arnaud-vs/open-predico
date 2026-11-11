@@ -122,6 +122,24 @@ Rules enforced by the harness:
 - **Before go-live:** dry run on the Predico playground; historical forecast export from the backtest if required.
 - **Playground:** production unlocks after 5 days of good playground predictions, so the live record starts on the playground. Every run is stored and published with `env` = `playground` or `production`. Both Spain resources and `germany_wind_50hertz_ca` exist there (checked 2026-11-03). Auth: access token ~1 h, refresh 24 h, no long-lived API key, so the password stays a secret.
 
+## Optional 50Hertz wind pair rollout (2026-11-11)
+
+The operator-selected alternative is T0-gamma + Timestral-209M on separate six-point
+speed-blended/T100 component inputs, with total-wind conformal Q10/Q90. The new isolated
+`live/modal_wind_pair.py` producer runs at 13:00/13:15 Berlin, freezes information at 13:30
+and must finish candidate computation before 14:00. Existing `submit.py` prefers a checked
+same-day private bundle at 14:15, otherwise retains its incumbent. Existing checks can upgrade
+a fallback run before the gate if the pair becomes readable. Solar, Spain, the existing crons,
+public publishing and climatology D+2..D+10 remain unchanged.
+
+This is a reviewed-code rollout path, not a claim of deployment or a fresh performance win.
+The maintainer must bootstrap private state, verify cloud smoke execution, and deploy both
+apps explicitly. Producer dependencies/checkpoints are pinned separately; the incumbent's
+production dependency versions are not changed. Research weather banks depend on TimesFM3
+outputs, so the supplied seed is rejected for production until rights or clean replacement
+assets (including dependent forecasts/calibration) are reviewed. See [the operator guide](docs/wind-pair-operations.md)
+for source licences, private data lineage, known seed-vintage limits, timing checks and rollback.
+
 ## Adding a target
 
 A target is an entry in `targets.toml` (`column`, `groups`, `truth`, `timezone`, `gate`, ...) plus
