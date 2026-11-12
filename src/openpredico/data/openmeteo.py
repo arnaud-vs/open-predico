@@ -49,7 +49,8 @@ _session = requests.Session()
 _session.mount(
     "https://",
     HTTPAdapter(
-        max_retries=Retry(total=3, backoff_factor=5, status_forcelist=[429, 500, 502, 503])
+        # waits 10..160 s (~5 min): ConnectionErrors outlasted 3 short retries on 2026-11-12
+        max_retries=Retry(total=5, backoff_factor=10, status_forcelist=[429, 500, 502, 503])
     ),
 )
 
