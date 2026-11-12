@@ -9,6 +9,7 @@ import modal
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
+    .apt_install("git")  # timestral is pinned to a git commit
     .pip_install_from_requirements("requirements/wind-pair.txt")
     .env({"HF_HOME": "/models", "HF_HUB_CACHE": "/models/hub"})
     .run_commands(
