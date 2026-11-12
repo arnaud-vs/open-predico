@@ -56,6 +56,7 @@ def main() -> None:
             stamp = f.rsplit("/", 1)[1].removesuffix(".parquet")
             run = pd.Timestamp(datetime.strptime(stamp, "%Y-%m-%dT%H%MZ"), tz="UTC")
             fc = hf.download("live-private", f)
+            fc.index = fc.index.as_unit("us")  # wind-pair runs are ns; mixed units join to object
             inputs = hf.download("live-private", f.replace("forecasts/", "inputs/", 1))
             y = inputs[TARGET_COLUMNS[name]]
             days = pd.DatetimeIndex(fc.index.tz_convert(t["timezone"]).normalize().unique())
