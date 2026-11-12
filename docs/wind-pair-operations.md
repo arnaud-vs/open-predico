@@ -1,8 +1,8 @@
 # 50Hertz T0 + Timestral wind pair: deployment and rollback
 
 This branch adds an isolated producer and a guarded handoff into the existing submission job.
-It is **not deployed by a merge**. Production is currently blocked on the research seed asset
-rights described below. Once resolved, deploy both apps after bootstrap and smoke validation.
+It is **not deployed by a merge**. Use the clean replacement seed described below, then deploy both apps after bootstrap and
+smoke validation. The legacy TimesFM-derived research seed remains rejected.
 No solar/Spain model, existing cron, gate time or public-publishing logic changes.
 
 ## What runs automatically
@@ -46,7 +46,7 @@ A GPU-enabled Modal workspace/payment setup is required; check its resource allo
   speed-band routing and estimated T100 reproduce the research feature layouts. The three
   North Sea offshore predictors are retained intentionally; this is not a Baltic-only redesign.
 - Weather banks are the latest approved causal bank no later than each issue. They are
-  initialized from the reviewed study and held until a reviewed asset update; **weather-bank
+  initialized from independent T0 raw-weather utility forecasts and held until a reviewed asset update; **weather-bank
   refitting is not automatic**. Pair-model weights and conformal calibration update daily.
 - Truth is existing `data/entsoe.py`: A75 B19/B18 in the 50Hertz control area. The official
   total is their sum. Recent truth revisions and missing collection periods are refetched;
@@ -56,8 +56,8 @@ A GPU-enabled Modal workspace/payment setup is required; check its resource allo
   component quantiles. Incomplete/stale calibration rejects the candidate. Bounds are clipped
   to [0, capacity]. Nominal 80% coverage is not a guarantee under time dependence.
 
-The private research seed contains historical simulated member/ensemble forecasts and research weather
-banks. Historical publication/revision vintages are unknown, and that is recorded in audit
+The private clean seed contains regenerated historical member/ensemble forecasts and T0-fitted
+weather banks. Old TimesFM-derived banks, member forecasts and residuals are not included. Historical publication/revision vintages are unknown, and that is recorded in audit
 metadata. Seed actual labels use the official ENTSO-E benchmark; missing dates are fetched
 on bootstrap. New historical catch-up predictions are labelled hindcasts, never submissions.
 The producer can recover up to seven missed member days automatically; larger gaps require
@@ -66,27 +66,38 @@ times, and saved historical forecasts are not recomputed with later data. This r
 claim a fresh holdout win: the selected pair improved period-average research scores versus
 its individual members, but those improvements remain statistically uncertain.
 
-## Production asset prerequisite — currently blocked
+## Clean replacement assets
 
-The supplied seed is **research-only and deliberately rejected by bootstrap/production**.
-Its speed-band weather banks were fitted to TimesFM3 predictions. The TimesFM licence
-[restrictions](https://huggingface.co/google/timesfm-3.0-pytorch/blob/main/LICENSE)
-cover production use of outputs and data as well as model inference. Removing TimesFM from
-inference alone does not establish permission to use those assets. All seeded pair member
-forecasts, totals and calibration also depend on those banks.
+The initial research seed used TimesFM3-derived weather banks and is deliberately rejected.
+The replacement `wind-pair-clean-seed.zip` uses **new T0-gamma raw-weather utility forecasts**
+for ICON-EU, ICON-D2, ICON Global and GFS Global, separately for each component. Per issue,
+last 60 complete prior days are eligible before issue minus two hours: minimum 21 days for
+the global convex blend (0.01 shrinkage to ICON-EU), minimum eight days/192 intervals for a
+point's speed cell (0.03 shrinkage to the global blend). The three cells use median forecast
+speed across sources, with 2.5/7.5/12.5 m/s interpolation anchors. This is conditional aggregate
+power-error routing, not verified local weather accuracy. Both pair models and the total's
+conformal residuals were regenerated from these banks; previous research forecasts are used
+only as an offline comparison, never to fit replacement assets.
 
-Before the deployment commands below, either obtain permission covering that downstream use,
-or rebuild the banks **and every dependent member/total/calibration forecast** using permitted
-sources (for example T0/Timestral power-error routing). Re-evaluate performance and coverage:
-existing research scores cannot be attributed to a replacement bank. After reviewing that
-artifact, the maintainer must supply `production_approval` in its checksum manifest with
-`approved: true` and a nonempty `reference` identifying the grant or reviewed clean-asset
-provenance. This is an explicit asset review, not a flag to set on the supplied research ZIP.
-The seed builder intentionally writes `approved: false`; no override is provided. Until this
-is resolved, retain the incumbent deployment. The recorded numerical validation below tests
-the research math and does not clear asset rights or cloud deployment.
+The current reviewed refit covers 104 delivery days, 24 July–5 November 2026, excluding the
+original 29 July weather gap. Latest coefficients for issue 12 November / delivery 13 November
+use 60 training days, **7 September–5 November**, not observations through yesterday. Missing
+recent days must be caught up during bootstrap. Weather-bank refitting remains a reviewed
+asset update; rolling model-pair weights and conformal calibration update automatically.
 
-## Maintainer steps (after the production asset prerequisite is resolved)
+`tools/build_wind_pair_seed.py --clean-run /secure/clean-refit` verifies the sealed refit's
+checksums, model revisions and clean provenance, and attaches its immutable manifest reference
+as `production_approval`. The default legacy builder still writes `approved: false`. Do not
+relabel the old seed. A clean provenance reference does not establish new holdout skill or
+replace operator checks of model/data terms and successful cloud operation.
+
+To reproduce the clean artifact from private caches and the supplied sealed refit:
+
+```sh
+python tools/build_wind_pair_seed.py --research-root /secure/research-outputs --clean-run /secure/clean-refit --output /secure/wind-pair-clean-seed.zip
+```
+
+## Maintainer steps (run from this repo checkout)
 
 1. Review/merge the PR, or check out its branch for bootstrap and validation first:
 
@@ -115,15 +126,15 @@ the research math and does not clear asset rights or cloud deployment.
    private dataset `open-predico/live-private`. The Timestral weight licence retains its
    attribution and employer monthly-revenue condition; retain the downloaded licence files.
 
-3. Obtain the separately provided **private** `wind-pair-seed.zip` and `.sha256` file from the
+3. Obtain the separately provided **private** `wind-pair-clean-seed.zip` and `.sha256` file from the
    contributor. Do not commit or put them in a public release. Verify the checksum. The seed
    is bound to the exact `configs/live/wind_pair.toml` fingerprint; changing model/data
    parameters requires a new reviewed seed. To reproduce the artifact from the research
-   caches, use `tools/build_wind_pair_seed.py` (requires the research environment's pandas/numpy).
+   caches, use the clean-refit command above (requires the research environment's pandas/numpy).
 
    ```sh
-   shasum -a 256 /secure/wind-pair-seed.zip
-   uv run --with modal==1.6.3 modal run src/openpredico/live/modal_wind_pair.py::bootstrap --seed /secure/wind-pair-seed.zip
+   shasum -a 256 /secure/wind-pair-clean-seed.zip
+   uv run --with modal==1.6.3 modal run src/openpredico/live/modal_wind_pair.py::bootstrap --seed /secure/wind-pair-clean-seed.zip
    uv run --with modal==1.6.3 modal run src/openpredico/live/modal_wind_pair.py::smoke
    ```
 
@@ -146,6 +157,15 @@ the research math and does not clear asset rights or cloud deployment.
    The first command adds the new producer schedule. The second updates the existing app
    with the guarded consumer and retry upgrade. Deploying only the producer will not change
    the submitted forecast. Nothing in this PR deploys or merges itself.
+
+   If first deployment misses both producer crons, a one-off run is possible **before 13:30**:
+
+   ```sh
+   uv run --with modal==1.6.3 modal run src/openpredico/live/modal_wind_pair.py::worker --mode produce
+   ```
+
+   After 13:30, do not backdate a new run; retain today's incumbent and use the next scheduled
+   issue. An already computed pending bundle may retry its unchanged upload until 14:00.
 
 5. Observe the next scheduled run. Verify producer status `ready`, then the 14:15 wind
    submission/coverage record and canonical HF archive model `wind_pair_t0_timestral_six_v1`.
@@ -193,11 +213,24 @@ as a routine retry.
 
 ## Verification performed before PR
 
-- Existing and new offline tests, lint and formatting in a clean lockfile-based environment.
+- Clean lockfile-based offline suite: **77 passed, one skipped**; lint and formatting passed.
 - Real cached T0/Timestral recorded-input producer replay for 5 November: 4 weather models,
   six points per component, 96 intervals, 60 calibration days; point difference from reviewed
-  research below 0.003 MW. Simulated acquisition times, no source/API writes or submissions.
-- Actual Modal definition imported locally using Modal 1.6.3, without deployment credentials.
+  clean-refit result below 0.005 MW in 18.4 seconds. Simulated acquisition times, no source/API writes or submissions.
+- Actual Modal definition and the manual worker CLI imported/checked locally using Modal 1.6.3,
+  without deployment credentials.
+- Full regenerated 104-day replay: primary 96-day total MAE **817.27 MW** (previous research
+  pair 819.74; TSO 605.56), later eight-day MAE **340.99 MW** (previous 321.04; TSO 270.23).
+  The change is not a demonstrated performance upgrade: the primary paired uncertainty
+  includes zero and the small reused later period worsens. New own-residual 80% intervals
+  cover **79.14%** over 73 eligible days (77.08% primary, 95.83% later). No coverage guarantee.
+- Eight future-truth perturbation checks leave weather banks unchanged. Fresh EU-only warmup
+  forecasts match the independent source forecasts within 0.011 MW over 44 component-days.
+
+The separately supplied clean ZIP has SHA256
+`c365764f50b90d4738c4bf64b2398aa5dad7717461796823ec3af23ddcc03ade`.
+Its latest weather banks use training forecasts through 5 November; bootstrap must refresh
+actuals and catch up missing recent forecast days before deployment.
 
 Cloud image build, live source access, L4 runtime, actual scheduled execution and Predico
 coverage **must be verified by the maintainer**. They were not run from the contributor's

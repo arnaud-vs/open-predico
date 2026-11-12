@@ -367,3 +367,37 @@ def test_research_seed_cannot_be_used_in_production(case, tmp_path):
     (tmp_path / "seed.json").write_text(json.dumps({"config_sha256": case["sha"]}))
     with pytest.raises(ValueError, match="not approved"):
         producer.produce(tmp_path, clock=lambda: case["origin"] - pd.Timedelta(minutes=30))
+
+
+def test_clean_asset_approval_requires_matching_provenance_and_checksums(case, tmp_path):
+    import runpy
+    from pathlib import Path
+
+    tool = Path(producer.__file__).resolve().parents[3] / "tools/build_wind_pair_seed.py"
+    verify = runpy.run_path(str(tool))["verified_clean_run"]
+    (tmp_path / "asset.txt").write_bytes(b"synthetic")
+    cfg, _ = producer.config()
+    manifest = {
+        "members_days": 104,
+        "provenance": {
+            "timesfm_outputs_used_for_fit_or_forecast": False,
+            "models": {
+                "t0": cfg["models"]["t0_revision"],
+                "timestral": cfg["models"]["timestral_revision"],
+            },
+            "weather_order": cfg["weather_models"],
+        },
+        "files": {"asset.txt": state.digest(b"synthetic")},
+    }
+    path = tmp_path / "asset_manifest.json"
+    path.write_text(json.dumps(manifest))
+    approval, _ = verify(tmp_path, cfg)
+    assert approval["approved"] is True
+    assert approval["reference"].startswith("clean-refit-sha256:")
+    (tmp_path / "asset.txt").write_bytes(b"changed")
+    with pytest.raises(ValueError, match="checksum"):
+        verify(tmp_path, cfg)
+    manifest["provenance"]["timesfm_outputs_used_for_fit_or_forecast"] = True
+    path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="unverified"):
+        verify(tmp_path, cfg)

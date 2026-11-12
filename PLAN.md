@@ -135,9 +135,9 @@ public publishing and climatology D+2..D+10 remain unchanged.
 This is a reviewed-code rollout path, not a claim of deployment or a fresh performance win.
 The maintainer must bootstrap private state, verify cloud smoke execution, and deploy both
 apps explicitly. Producer dependencies/checkpoints are pinned separately; the incumbent's
-production dependency versions are not changed. Research weather banks depend on TimesFM3
-outputs, so the supplied seed is rejected for production until rights or clean replacement
-assets (including dependent forecasts/calibration) are reviewed. See [the operator guide](docs/wind-pair-operations.md)
+production dependency versions are not changed. The legacy TimesFM3-derived seed remains rejected. The clean replacement uses
+fresh T0 raw-weather utility forecasts to fit speed-band banks and regenerated T0/Timestral
+members, pair totals and conformal residuals; its checksummed provenance is verified on packaging. See [the operator guide](docs/wind-pair-operations.md)
 for source licences, private data lineage, known seed-vintage limits, timing checks and rollback.
 
 ## Adding a target
