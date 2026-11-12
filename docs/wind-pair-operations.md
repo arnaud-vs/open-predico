@@ -56,7 +56,7 @@ A GPU-enabled Modal workspace/payment setup is required; check its resource allo
   component quantiles. Incomplete/stale calibration rejects the candidate. Bounds are clipped
   to [0, capacity]. Nominal 80% coverage is not a guarantee under time dependence.
 
-The private clean seed contains regenerated historical member/ensemble forecasts and T0-fitted
+The public historical seed contains regenerated historical member/ensemble forecasts and T0-fitted
 weather banks. Old TimesFM-derived banks, member forecasts and residuals are not included. Historical publication/revision vintages are unknown, and that is recorded in audit
 metadata. Seed actual labels use the official ENTSO-E benchmark; missing dates are fetched
 on bootstrap. New historical catch-up predictions are labelled hindcasts, never submissions.
@@ -126,15 +126,16 @@ python tools/build_wind_pair_seed.py --research-root /secure/research-outputs --
    private dataset `open-predico/live-private`. The Timestral weight licence retains its
    attribution and employer monthly-revenue condition; retain the downloaded licence files.
 
-3. Obtain the separately provided **private** `wind-pair-clean-seed.zip` and `.sha256` file from the
-   contributor. Do not commit or put them in a public release. Verify the checksum. The seed
-   is bound to the exact `configs/live/wind_pair.toml` fingerprint; changing model/data
-   parameters requires a new reviewed seed. To reproduce the artifact from the research
-   caches, use the clean-refit command above (requires the research environment's pandas/numpy).
+3. Use the committed historical bootstrap fixture in
+   `artifacts/bootstrap/wind-pair/2026-11-12/`. Its [README](../artifacts/bootstrap/wind-pair/README.md)
+   explains the contents, source attribution and historical cutoff. Verify the checksum.
+   It is bound to the exact `configs/live/wind_pair.toml` fingerprint; changing model/data
+   parameters requires a new reviewed seed. The builder still writes new artifacts outside
+   the checkout; this single reviewed fixture is an explicit public-storage exception.
 
    ```sh
-   shasum -a 256 /secure/wind-pair-clean-seed.zip
-   uv run --with modal==1.6.3 modal run src/openpredico/live/modal_wind_pair.py::bootstrap --seed /secure/wind-pair-clean-seed.zip
+   (cd artifacts/bootstrap/wind-pair/2026-11-12 && shasum -a 256 -c wind-pair-clean-seed.sha256)
+   uv run --with modal==1.6.3 modal run src/openpredico/live/modal_wind_pair.py::bootstrap --seed artifacts/bootstrap/wind-pair/2026-11-12/wind-pair-clean-seed.zip
    uv run --with modal==1.6.3 modal run src/openpredico/live/modal_wind_pair.py::smoke
    ```
 
@@ -227,7 +228,7 @@ as a routine retry.
 - Eight future-truth perturbation checks leave weather banks unchanged. Fresh EU-only warmup
   forecasts match the independent source forecasts within 0.011 MW over 44 component-days.
 
-The separately supplied clean ZIP has SHA256
+The committed historical clean ZIP has SHA256
 `c365764f50b90d4738c4bf64b2398aa5dad7717461796823ec3af23ddcc03ade`.
 Its latest weather banks use training forecasts through 5 November; bootstrap must refresh
 actuals and catch up missing recent forecast days before deployment.

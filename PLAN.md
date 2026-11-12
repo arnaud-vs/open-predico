@@ -138,7 +138,11 @@ apps explicitly. Producer dependencies/checkpoints are pinned separately; the in
 production dependency versions are not changed. The legacy TimesFM3-derived seed remains rejected. The clean replacement uses
 fresh T0 raw-weather utility forecasts to fit speed-band banks and regenerated T0/Timestral
 members, pair totals and conformal residuals; its checksummed provenance is verified on packaging. See [the operator guide](docs/wind-pair-operations.md)
-for source licences, private data lineage, known seed-vintage limits, timing checks and rollback.
+for source licences, data lineage, known seed-vintage limits, timing checks and rollback.
+The user-approved historical bootstrap seed is committed as an immutable dated fixture under
+`artifacts/bootstrap/wind-pair/2026-11-12/`, with a checksum, audit and source attribution.
+It contains historical hindcasts through 5 November, not live contest submission records;
+runtime state and candidate bundles continue using private storage.
 
 ## Adding a target
 
