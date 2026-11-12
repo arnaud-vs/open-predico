@@ -236,7 +236,7 @@ def _new_totals(root, cfg, days, actuals, members, force=None, persist=True):
     return totals
 
 
-def initialize(root, *, device="cuda"):
+def initialize(root, *, device="cpu"):
     """One-off catch-up after seed install, no ready candidate or Predico submission."""
     cfg, sha = config()
     seed = json.loads((root / "seed.json").read_text())
@@ -255,7 +255,7 @@ def initialize(root, *, device="cuda"):
     return {"status": "initialized", "catchup_days": len(days)}
 
 
-def produce(root, *, device="cuda", clock=None):
+def produce(root, *, device="cpu", clock=None):
     clock = clock or (lambda: pd.Timestamp.now(tz="UTC"))
     cfg, sha = config()
     if not cfg["enabled"]:
@@ -361,7 +361,7 @@ def produce(root, *, device="cuda", clock=None):
     return {"status": "ready", "day": day, "intervals": len(fc)}
 
 
-def smoke(root, *, device="cuda"):
+def smoke(root, *, device="cpu"):
     """Real-model and calibration check at invocation time, never a ready production run."""
     started = time.monotonic()
     result = initialize(root, device=device)

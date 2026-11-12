@@ -27,7 +27,7 @@ late data. If Modal starts the collection too late, inference fails, sources are
 calibration is unavailable or HF is inaccessible, wind follows the existing T0 submission path.
 Separate apps mean producer latency cannot block the existing submission scheduler.
 
-The worker uses one L4 GPU, 2 CPUs, 16 GiB host memory, a 40-minute job timeout and at most one
+The worker uses 4 CPUs (no GPU), 16 GiB host memory, a 40-minute job timeout and at most one
 container. Bootstrap and daily work are serialized through that worker. The new worker adds
 one cron definition (two daily invocations), leaving the existing three cron definitions intact.
 A GPU-enabled Modal workspace/payment setup is required; check its resource allowance/usage.

@@ -100,7 +100,7 @@ class _T0:
         return SimpleNamespace(median=fc.median)
 
 
-def predict(days, inputs, actuals, device="cuda", cache_dir=None):
+def predict(days, inputs, actuals, device="cpu", cache_dir=None):
     """Load one engine at a time; return all four member Q50s on aligned delivery grids."""
     import torch
 

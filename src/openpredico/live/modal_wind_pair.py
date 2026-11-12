@@ -28,8 +28,7 @@ volume = modal.Volume.from_name("open-predico-wind-pair-state", create_if_missin
 
 @app.function(
     schedule=modal.Cron("0,15 13 * * *", timezone="Europe/Berlin"),
-    gpu="L4",
-    cpu=2.0,
+    cpu=4.0,  # CPU, as the incumbent t0 run: no GPU queue before the 13:30 origin
     memory=16384,
     timeout=2400,
     max_containers=1,
