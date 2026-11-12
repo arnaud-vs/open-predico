@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "manifest_branch": "codex/wind-pair-snapshots",
+  "manifest_path": "assets/wind-pair/latest.json",
+  "manifest_url": "https://raw.githubusercontent.com/arnaud-vs/open-predico/refs/heads/codex/wind-pair-snapshots/assets/wind-pair/latest.json",
+  "release_tag_pattern": "wind-pair-bootstrap-YYYY-MM-DD",
+  "workflow": "wind-snapshot.yml",
+  "schedule_utc": "18:30 daily",
+  "initial_fallback": "assets/wind-pair/wind-pair-clean-seed.zip",
+  "initial_sha256": "c365764f50b90d4738c4bf64b2398aa5dad7717461796823ec3af23ddcc03ade",
+  "activation_required": "Deploy producer exporter, configure Actions Modal credentials, verify first workflow run."
+}

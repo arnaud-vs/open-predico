@@ -1,0 +1,37 @@
+name: public wind snapshot
+
+on:
+  schedule:
+    - cron: "30 18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: public-wind-snapshot
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'arnaud-vs/open-predico' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      MODAL_ENVIRONMENT: ${{ vars.MODAL_ENVIRONMENT }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check exporter credentials
+        shell: bash
+        run: |
+          if [ -z "$MODAL_TOKEN_ID" ] || [ -z "$MODAL_TOKEN_SECRET" ]; then
+            echo "Set MODAL_TOKEN_ID and MODAL_TOKEN_SECRET in repository Actions secrets."
+            exit 1
+          fi
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen
+      - name: Export, validate and publish past-only snapshot
+        run: uv run --with modal==1.6.3 python tools/publish_wind_snapshot.py --output-dir "$RUNNER_TEMP/wind-snapshot"

@@ -140,6 +140,19 @@ fresh T0 raw-weather utility forecasts to fit speed-band banks and regenerated T
 members, pair totals and conformal residuals; its checksummed provenance is verified on packaging. See [the operator guide](docs/wind-pair-operations.md)
 for source licences, private data lineage, known seed-vintage limits, timing checks and rollback.
 
+## Public rolling wind snapshots (2026-11-12)
+
+Daily GitHub Release assets expose the historical bootstrap state without adding large ZIPs
+into Git history. `wind-snapshot.yml` runs at 18:30 UTC and invokes the existing serialized
+Modal worker's export-only mode, then independently validates the past-only allowlisted
+archive. Current/future delivery-day rows and runtime candidate directories are excluded;
+late actuals stay missing and stale calibration history stops publication. Dated releases
+are immutable, and publication precedes the metadata-only latest pointer on
+`codex/wind-pair-snapshots`. The initial committed ZIP remains a fallback. This does not refit
+weather banks or change inference/submission schedules. A maintainer must deploy the exporter
+and configure Actions Modal credentials before activation; see
+[public snapshot operations](docs/wind-pair-snapshots.md).
+
 ## Adding a target
 
 A target is an entry in `targets.toml` (`column`, `groups`, `truth`, `timezone`, `gate`, ...) plus
