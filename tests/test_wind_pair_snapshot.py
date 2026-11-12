@@ -246,3 +246,33 @@ def test_recent_unpublished_actuals_stay_missing_without_blocking_snapshot(tmp_p
     with zipfile.ZipFile(output / result["snapshot_date"] / snapshot.ARCHIVE) as z:
         saved = pd.read_parquet(io.BytesIO(z.read("actuals.parquet")))
         assert saved.reindex(day_grid("2026-11-11")).total.isna().all()
+
+
+def test_resuming_draft_without_published_tag(publisher, monkeypatch):
+    def fake(*args, **kwargs):
+        if "/releases/tags/" in args[1]:
+            return None
+        return [{"tag_name": "wind-pair-bootstrap-2026-11-12", "draft": True, "assets": []}]
+
+    monkeypatch.setattr(publisher, "gh", fake)
+    assert (
+        publisher.release_metadata("owner/repo", "wind-pair-bootstrap-2026-11-12")["draft"] is True
+    )
+
+
+def test_first_pointer_creates_metadata_only_branch(publisher, monkeypatch):
+    writes = []
+
+    def fake(*args, data=None, **kwargs):
+        if data is None:
+            return None
+        writes.append((args[1], data))
+        return {"sha": "a" * 40}
+
+    monkeypatch.setattr(publisher, "gh", fake)
+    publisher.pointer_update("owner/repo", {"snapshot_date": "2026-11-12", "sha256": "abc"})
+    assert len(writes) == 3
+    assert [item["path"] for item in writes[0][1]["tree"]] == [publisher.POINTER]
+    assert writes[1][1]["parents"] == []
+    assert writes[1][1]["author"] == publisher.BOT
+    assert writes[2][1]["ref"] == f"refs/heads/{publisher.BRANCH}"

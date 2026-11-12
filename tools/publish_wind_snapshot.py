@@ -19,6 +19,10 @@ from openpredico.live.wind_pair_state import digest
 
 BRANCH = "codex/wind-pair-snapshots"
 POINTER = "assets/wind-pair/latest.json"
+BOT = {
+    "name": "github-actions[bot]",
+    "email": "41898282+github-actions[bot]@users.noreply.github.com",
+}
 
 
 def gh(*args, data=None, missing_ok=False):
@@ -43,7 +47,12 @@ def gh(*args, data=None, missing_ok=False):
 
 
 def release_metadata(repo, tag):
-    return gh("api", f"repos/{repo}/releases/tags/{tag}", missing_ok=True)
+    release = gh("api", f"repos/{repo}/releases/tags/{tag}", missing_ok=True)
+    if release is not None:
+        return release
+    # A draft need not have a published git tag yet; resumable uploads still find it.
+    recent = gh("api", f"repos/{repo}/releases?per_page=100")
+    return next((item for item in recent if item["tag_name"] == tag), None)
 
 
 def published_archive_matches(repo, tag, public):
@@ -106,6 +115,8 @@ def pointer_update(repo, pointer):
                 "message": message,
                 "tree": tree["sha"],
                 "parents": [],
+                "author": BOT,
+                "committer": BOT,
             },
         )
         gh(
