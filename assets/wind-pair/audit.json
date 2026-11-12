@@ -1,0 +1,43 @@
+{
+  "sha256": "c365764f50b90d4738c4bf64b2398aa5dad7717461796823ec3af23ddcc03ade",
+  "bytes": 18669019,
+  "frames": {
+    "weather/onshore.parquet": {
+      "rows": 19012,
+      "start_utc": "2026-04-21T22:00:00+00:00",
+      "end_utc": "2026-11-05T22:45:00+00:00"
+    },
+    "weather/offshore.parquet": {
+      "rows": 19012,
+      "start_utc": "2026-04-21T22:00:00+00:00",
+      "end_utc": "2026-11-05T22:45:00+00:00"
+    },
+    "members.parquet": {
+      "rows": 9988,
+      "start_utc": "2026-07-23T22:00:00+00:00",
+      "end_utc": "2026-11-05T22:45:00+00:00"
+    },
+    "totals.parquet": {
+      "rows": 9988,
+      "start_utc": "2026-07-23T22:00:00+00:00",
+      "end_utc": "2026-11-05T22:45:00+00:00"
+    },
+    "actuals.parquet": {
+      "rows": 66336,
+      "start_utc": "2024-12-10T00:00:00+00:00",
+      "end_utc": "2026-10-31T23:45:00+00:00"
+    }
+  },
+  "config_sha256": "2a38a5e99e49e46537222bc33152c3e2ea56c5a6f7d5a227454e9c85b7fb5512",
+  "historical_vintages_verified": false,
+  "purpose": "Immutable historical bootstrap fixture, not contest submission records",
+  "release_date": "2026-11-12",
+  "historical_hindcasts_only": true,
+  "contains_live_candidate_bundles": false,
+  "contains_pretrained_model_weights": false,
+  "latest_weather_bank_training_delivery_day": "2026-11-05",
+  "weather_bank_parameter_dates": {
+    "first": "2026-07-24",
+    "last": "2026-11-13"
+  }
+}
