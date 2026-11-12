@@ -236,3 +236,11 @@ actuals and catch up missing recent forecast days before deployment.
 Cloud image build, live source access, L4 runtime, actual scheduled execution and Predico
 coverage **must be verified by the maintainer**. They were not run from the contributor's
 workspace, which has no Modal profile. No production deployment is claimed by this PR.
+
+## Automatic public historical snapshots
+
+[Daily GitHub snapshots](wind-pair-snapshots.md) provide refreshed public bootstrap ZIPs as
+Release assets, with a latest-download manifest on a separate metadata branch. They exclude
+current/future delivery days. A maintainer must deploy the export-capable producer and set
+the Actions Modal credentials before the daily workflow can run. The committed initial seed
+remains available as a fallback; existing runtime state is never reset by publication.

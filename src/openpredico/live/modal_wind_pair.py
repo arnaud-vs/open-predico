@@ -66,13 +66,34 @@ def worker(mode: str = "produce"):
                 raise ValueError("wind session is not open")
             submit.main(dry_run=False, only=["germany_wind_50hertz_ca"])
             result = {"status": "incumbent_submitted"}
+        elif mode == "export":
+            import pandas as pd
+
+            from openpredico.live import wind_pair_snapshot
+
+            cfg, sha = wind_pair.config()
+            try:
+                result = wind_pair_snapshot.export(
+                    root,
+                    Path("/state/exports/wind-pair"),
+                    cfg=cfg,
+                    config_hash=sha,
+                    now=pd.Timestamp.now(tz="UTC"),
+                )
+            except wind_pair_snapshot.SnapshotError as error:
+                result = {"status": "snapshot_unavailable", "reason": str(error)}
+            except Exception as error:
+                result = {
+                    "status": "snapshot_unavailable",
+                    "reason": f"export_{type(error).__name__}",
+                }
         elif mode == "produce":
             result = wind_pair.produce(root)
         else:
             raise ValueError("unknown wind-pair job")
         from openpredico.live.wind_pair_state import compact
 
-        if mode != "incumbent":
+        if mode not in {"incumbent", "export"}:
             compact(root)
         print(f"wind-pair {mode}: {result}")  # status/counts only, never forecast values
         return result
