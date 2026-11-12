@@ -246,7 +246,10 @@ def initialize(root, *, device="cpu"):
     actuals = _actuals(root)
     members = _load(root, "members")
     end = str((pd.Timestamp.now(tz=TZ).normalize() + pd.DateOffset(days=1)).date())
-    start = members.index.max().tz_convert(TZ).normalize() + pd.DateOffset(days=1)
+    # ponytail: catch up from two days ago only (days already complete are skipped); older gaps
+    # stay empty: the rolling weights and conformal bank need 21 and 30 of their 60 days, and a
+    # calibration day within 3 days
+    start = pd.Timestamp.now(tz=TZ).normalize() - pd.DateOffset(days=2)
     days = pd.date_range(start, pd.Timestamp(end, tz=TZ), freq="D").strftime("%Y-%m-%d").tolist()
     if days:
         _collect(root, cfg, days)

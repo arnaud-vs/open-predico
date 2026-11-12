@@ -34,6 +34,8 @@ ADAPTERS = {
     "amazon": "chronos2",
     "google": "timesfm",
     "theforecastingcompany": "t0",
+    "ContinuousIntelligence": "ciproto",
+    "h2oai": "timeh2o",
 }
 MAX_NAN = 0.9  # columns missing more than this share of the history are dropped
 
