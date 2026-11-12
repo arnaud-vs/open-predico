@@ -114,7 +114,8 @@ python tools/build_wind_pair_seed.py --research-root /secure/research-outputs --
    secret: it supplies HF/ENTSO-E and the maintainer-only Predico credentials. Prepare the new
    weather secret from a file **outside the checkout**, using your provider's licensed
    single-runs HTTPS endpoint and key. The empty template is `docs/wind-weather.env.example`.
-   The free Open-Meteo endpoint is deliberately rejected for commercial collection.
+   Until that secret exists, the producer uses the free Open-Meteo endpoint (as the incumbent's
+   ECMWF weather does); add the secret back to `modal_wind_pair.py` once a paid key exists.
    Never paste credentials into chat, commit them, or put keys on the command line.
 
    ```sh

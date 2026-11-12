@@ -90,10 +90,11 @@ def _load(root, name):
 
 def _collect(root, cfg, days):
     """Save daily raw runs and append target-day weather, never weather observations."""
-    if os.getenv("WIND_PAIR_WEATHER_LICENSED") != "1":
-        raise ValueError("licensed point-weather configuration is required")
-    url = os.environ["OPEN_METEO_BASE_URL"]
-    key = os.environ["OPEN_METEO_API_KEY"]
+    # ponytail: free endpoint unless a paid key is set, as the incumbent's ECMWF weather does;
+    # set OPEN_METEO_BASE_URL/OPEN_METEO_API_KEY (open-predico-wind-weather) for commercial use
+    licensed = os.getenv("WIND_PAIR_WEATHER_LICENSED") == "1"
+    url = os.getenv("OPEN_METEO_BASE_URL") or wind_weather.BASE_URL
+    key = os.getenv("OPEN_METEO_API_KEY")
     points = cfg["onshore_points"] + cfg["offshore_points"]
     all_records = []
     for day in days:
@@ -105,7 +106,7 @@ def _collect(root, cfg, days):
             for model in wind_weather.MODELS:
                 records.append(
                     wind_weather.fetch_run(
-                        day, model, points, base_url=url, api_key=key, commercial=True
+                        day, model, points, base_url=url, api_key=key, commercial=licensed
                     )
                 )
                 time.sleep(1)

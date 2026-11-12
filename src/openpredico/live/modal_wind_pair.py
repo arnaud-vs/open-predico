@@ -33,10 +33,9 @@ volume = modal.Volume.from_name("open-predico-wind-pair-state", create_if_missin
     timeout=2400,
     max_containers=1,
     volumes={"/state": volume},
-    secrets=[
-        modal.Secret.from_name("open-predico"),
-        modal.Secret.from_name("open-predico-wind-weather"),
-    ],
+    # ponytail: free Open-Meteo for now; add modal.Secret.from_name("open-predico-wind-weather")
+    # here once a paid key exists (docs/wind-pair-operations.md)
+    secrets=[modal.Secret.from_name("open-predico")],
 )
 def worker(mode: str = "produce"):
     """One serialized worker prevents bootstrap/producer state races."""
