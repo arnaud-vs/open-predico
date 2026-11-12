@@ -1,0 +1,47 @@
+# Only D+1 wind is replaced when a verified same-day private candidate is ready.
+# Deployment and bootstrap are explicit operator actions; no schedule starts on merge.
+enabled = true
+target = "germany_wind_50hertz_ca"
+pipeline = "wind_pair_t0_timestral_six_v1"
+origin = "13:30"
+timezone = "Europe/Berlin"
+context_days = 92
+actual_lag_hours = 2
+capacity_mw = 24500.0
+weather_models = ["icon_eu", "icon_d2", "icon_global", "gfs_global"]
+regional_run_hour_utc = 6
+global_run_hour_utc = 0
+wind_speed_knots_ms = [2.5, 7.5, 12.5]
+temperature = "(ICON-EU temperature_80m + temperature_120m) / 2"
+# Preserve the tested points. Three offshore weather points are North Sea predictors,
+# not generators in the 50Hertz target. A Baltic-only redesign is a different experiment.
+onshore_points = [[52.535, 11.732], [53.727, 13.336], [53.378, 13.949], [52.117, 12.58], [51.3444, 13.37025], [51.04, 10.70]]
+offshore_points = [[54.26000213623047, 6.21999979019165], [54.720001220703125, 13.939998626708984], [54.5, 6.21999979019165], [54.02000045776367, 6.440000057220459], [54.98, 13.17], [54.81728, 13.67714]]
+# The research source must not be relabelled as Predico truth.
+truth_source = "entsoe:A75_B18+B19@10YDE-VE-------2"
+tso_proxy_inputs = false
+
+[calibration]
+method = "rolling_asymmetric_one_sided_conformal"
+window_days = 60
+minimum_days = 30
+tail_probability = 0.1
+quantiles = [0.1, 0.5, 0.9]
+calibrate_on = "actual_total_minus_sum_of_component_points"
+
+[storage]
+dataset = "open-predico/live-private"
+prefix = "wind-pair/v1"
+candidate_before = "14:00"
+
+[ensemble]
+onshore = "constrained_learned"
+offshore = "simple_mean"
+window_days = 60
+minimum_days = 21
+regularization = 0.1
+max_weight = 0.7
+
+[models]
+t0_revision = "e08aee083778f1f32da4974c0a34276776a35c52"
+timestral_revision = "9874d252ab0aae16f7f7c999f98f98d6ad7d8365"

@@ -18,6 +18,8 @@ from openpredico.data.groups import build
 from openpredico.evaluation.backtest import PUBLICATION_LAG, clip
 from openpredico.evaluation.experiment import CATEGORICAL, features
 from openpredico.live.predico import Predico
+from openpredico.live.wind_pair_consumer import needs_retry as pair_needs_retry
+from openpredico.live.wind_pair_consumer import ready as ready_wind_pair
 from openpredico.models.baselines import slot_climatology
 from openpredico.models.tsfm import t0
 
@@ -83,13 +85,19 @@ def main(dry_run: bool, only: list[str] | None = None) -> None:
     if unknown := set(only or ()) - targets.keys():
         sys.exit(f"unknown targets: {sorted(unknown)}")
     client = None if dry_run else Predico()  # log in first: fail fast on bad credentials
-    predict = t0.make_predict(t0.load(MODEL), CONTEXT_DAYS, CATEGORICAL)
+    predict = None  # load lazily: a ready wind pair does not need incumbent D+1 inference
     built = {}  # (groups, tz) -> frames: the Spain targets share one build
     for name, target in targets.items():
-        key = (tuple(target["groups"]), target["timezone"])
-        if key not in built:
-            built[key] = build_frames(now, *key)
-        fc, inputs = forecast(name, built[key], predict, now)
+        candidate = ready_wind_pair(name, now)
+        if candidate is not None:
+            fc, inputs = candidate
+        else:
+            if predict is None:
+                predict = t0.make_predict(t0.load(MODEL), CONTEXT_DAYS, CATEGORICAL)
+            key = (tuple(target["groups"]), target["timezone"])
+            if key not in built:
+                built[key] = build_frames(now, *key)
+            fc, inputs = forecast(name, built[key], predict, now)
         validate(fc, now)
         print(f"{name}: {len(fc)} steps {fc.index.min()} .. {fc.index.max()}")  # no values
         if dry_run:
@@ -176,7 +184,10 @@ def missing(client: Predico, now: pd.Timestamp) -> list[str]:
     """Targets to resubmit: not covered on Predico, or no t0 run of ours today."""
     by_resource = {t["predico_resource"]: n for n, t in load_targets().items()}
     files = HfApi().list_repo_files(f"{hf.ORG}/live-private", repo_type="dataset")
-    return sorted({by_resource[r] for r in not_ready(client)} | set(not_run(now, files)))
+    pending = {by_resource[r] for r in not_ready(client)} | set(not_run(now, files))
+    if pair_needs_retry(now, files):
+        pending.add("germany_wind_50hertz_ca")
+    return sorted(pending)
 
 
 def check_and_retry() -> None:
