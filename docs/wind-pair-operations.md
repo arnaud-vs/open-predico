@@ -94,7 +94,7 @@ replace operator checks of model/data terms and successful cloud operation.
 To reproduce the clean artifact from private caches and the supplied sealed refit:
 
 ```sh
-python tools/build_wind_pair_seed.py --research-root /secure/research-outputs --clean-run /secure/clean-refit --output /secure/wind-pair-clean-seed.zip
+python tools/build_wind_pair_seed.py --research-root /secure/research-outputs --clean-run /secure/clean-refit --output assets/wind-pair/wind-pair-clean-seed.zip
 ```
 
 ## Maintainer steps (run from this repo checkout)
@@ -134,8 +134,8 @@ python tools/build_wind_pair_seed.py --research-root /secure/research-outputs --
    caches, use the clean-refit command above (requires the research environment's pandas/numpy).
 
    ```sh
-   shasum -a 256 /secure/wind-pair-clean-seed.zip
-   uv run --with modal==1.6.3 modal run src/openpredico/live/modal_wind_pair.py::bootstrap --seed /secure/wind-pair-clean-seed.zip
+   shasum -a 256 assets/wind-pair/wind-pair-clean-seed.zip
+   uv run --with modal==1.6.3 modal run src/openpredico/live/modal_wind_pair.py::bootstrap --seed assets/wind-pair/wind-pair-clean-seed.zip
    uv run --with modal==1.6.3 modal run src/openpredico/live/modal_wind_pair.py::smoke
    ```
 
