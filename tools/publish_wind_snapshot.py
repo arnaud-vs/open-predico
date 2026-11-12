@@ -166,7 +166,11 @@ def publish(folder, public, repo, revision):
                 "Past-only model/input rows plus approved routing parameters; no current/future "
                 "delivery-day forecast rows, secrets or "
                 "pretrained checkpoints. Historical vintages remain unverified. "
-                "See docs/wind-pair-snapshots.md and source attribution in the archive manifest.\n"
+                f"See [snapshot operations](https://github.com/{repo}/blob/{revision}/"
+                "docs/wind-pair-snapshots.md). Weather data by [Open-Meteo](https://open-meteo.com/) "
+                "([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)), using DWD ICON "
+                "and NOAA GFS. Generation: [ENTSO-E](https://transparency.entsoe.eu/). "
+                "Transformation/source attribution is retained in the archive manifest.\n"
             )
             command = [
                 "gh",

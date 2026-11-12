@@ -287,8 +287,11 @@ def export(root: Path, output: Path, *, cfg: dict, config_hash: str, now: pd.Tim
                 default="",
             ),
             "attribution": [
-                "Weather data by Open-Meteo.com; DWD ICON and NOAA GFS; CC BY 4.0",
-                "Generation: ENTSO-E Transparency Platform, 50Hertz control area",
+                "Weather data by Open-Meteo https://open-meteo.com/; DWD ICON and NOAA GFS; "
+                "CC BY 4.0 https://creativecommons.org/licenses/by/4.0/; modified height, "
+                "direction and quarter-hour weather channels, including estimated T100",
+                "Generation: ENTSO-E Transparency Platform https://transparency.entsoe.eu/; "
+                "50Hertz control area, total is onshore plus offshore",
             ],
             "files": {name: digest(data) for name, data in files.items()},
         }
