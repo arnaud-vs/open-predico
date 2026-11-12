@@ -78,7 +78,8 @@ def worker(mode: str = "produce"):
         return result
     except Exception as error:
         raise RuntimeError(
-            f"wind-pair job failed ({type(error).__name__}); incumbent retained"
+            # message, not traceback: ours are fixed strings; HTTP errors never carry the URL
+            f"wind-pair job failed ({type(error).__name__}: {str(error)[:200]}); incumbent retained"
         ) from None
     finally:
         if mode != "incumbent":
