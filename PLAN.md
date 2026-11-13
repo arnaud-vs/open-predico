@@ -118,7 +118,7 @@ Rules enforced by the harness:
 - **`submit`:** build features → predict → validate (full grid, no NaN, sorted, ≤ 240 h) → submit → save forecast and exact inputs to HF `live-private`. Never prints forecast values (logs may be shared; the repo is public).
 - **`publish`:** after gate closure, copy closed days to public HF `live`; fetch actuals and Predico's official scores for us; recompute scores until the month freezes (day 7 of the next month); fail if today's submission is missing.
 - **Monitoring:** Modal failure alerts (enable in workspace settings) plus the `publish` check (which catches skipped runs).
-- **Secrets:** Modal secret `open-predico`: `HF_TOKEN` (fine-grained, org-scoped), `ESIOS_TOKEN`, `ENTSOE_API_KEY` (German targets), `PREDICO_EMAIL`, `PREDICO_PASSWORD`, `PREDICO_PLAYGROUND_URL` and `PREDICO_URL` (scheme optional). `URL_VAR` in `live/predico.py` picks one: the playground until production unlocks.
+- **Secrets:** Modal secret `open-predico`: `HF_TOKEN` (fine-grained, org-scoped), `ESIOS_TOKEN`, `ENTSOE_API_KEY` (German targets), `PREDICO_EMAIL`, `PREDICO_PASSWORD`, `PREDICO_PLAYGROUND_URL` and `PREDICO_URL` (scheme optional). `URL_VAR` in `live/predico.py` picks one: production since 2026-11-13.
 - **Before go-live:** dry run on the Predico playground; historical forecast export from the backtest if required.
 - **Playground:** production unlocks after 5 days of good playground predictions, so the live record starts on the playground. Every run is stored and published with `env` = `playground` or `production`. Both Spain resources and `germany_wind_50hertz_ca` exist there (checked 2026-11-03). Auth: access token ~1 h, refresh 24 h, no long-lived API key, so the password stays a secret.
 

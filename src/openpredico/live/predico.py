@@ -10,8 +10,8 @@ import pandas as pd
 import requests
 
 QUANTILES = ("q10", "q50", "q90")
-# ponytail: playground until production unlocks (5 good days); then switch to "PREDICO_URL".
-URL_VAR = "PREDICO_PLAYGROUND_URL"
+# production since 2026-11-13; "PREDICO_PLAYGROUND_URL" for dry runs
+URL_VAR = "PREDICO_URL"
 
 
 class Predico:
