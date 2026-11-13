@@ -709,7 +709,6 @@ const MARKETS = [
     city: "Madrid", gateLocal: "17:00 Madrid on D-1", source: "ESIOS", missingTruth: "Quarter-hours without truth (no mFRR activation, so no price) are left out.",
     about: (from, to) => `The truth series from <span class="mono">v1/target.parquet</span>: mFRR activated <b>energy</b> (net, MWh per quarter-hour, upward positive) and mFRR <b>price</b> (EUR/MWh), Spain, 15-min, ${from} – ${to}. Missing energy is filled with 0 (no activation); missing price stays empty. No data during the Iberian blackout (28 Apr – 6 May 2025). Prices rise from Jul 2026 (monthly mean ~100 → ~157 EUR/MWh).` },
   { id: "be-solar", name: "Belgium solar", program: "Elia", gate: "10:00 CET, D-1 (plus hourly intraday)", resources: ["belgium_solar_opendata_elia"], truth: "Elia Open Data (ods032)" },
-  { id: "be-wind", name: "Belgium offshore wind", program: "Elia", gate: "10:00 CET, D-1 (paused by Elia)", resources: ["offshore_wind_opendata_elia"], truth: "Elia Open Data" },
   { id: "de-solar", name: "Germany solar", note: "50Hertz", resources: ["germany_solar_50hertz_ca"], truth: "ENTSO-E A75 B16, 50Hertz control area", about: de50Hertz("solar (A75 B16)"), ...DE },
   { id: "de-wind", name: "Germany wind", note: "50Hertz", resources: ["germany_wind_50hertz_ca"], truth: "ENTSO-E A75 B18 + B19, 50Hertz control area", about: de50Hertz("wind offshore + onshore (A75 B18 + B19)"), ...DE },
 ];
