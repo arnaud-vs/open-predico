@@ -183,6 +183,10 @@ its feature groups in `groups.toml`. Remaining Spain-specific code: `to_grid` (E
   province points weighted by PV capacity: future), `calendar`.
 - **Benchmark:** Elia's own forecast (`tso_forecast_be`, issued 11:00 D-1), Predico's owner
   benchmark, scored as config `elia_dayahead11h` (`experiment ... tso`).
+- **Backtest (2026-11-13, 2025-11-01 to 2026-10-25):** `t0gamma_cov_ctx90` RMSE 405, Winkler
+  1044, coverage 85%; Elia's forecast (`elia_dayahead11h`) RMSE 316, Winkler 912, coverage 88%;
+  `slot_climatology_28d` RMSE 826. t0 is ~28% behind Elia on RMSE (16-40% by quarter) and wins
+  36% of days. Elia issues at 11:00 D-1 with fresher weather than our 18 UTC D-2 run.
 - **Live:** not yet (`live = false` in targets.toml keeps it out of submit, check and publish).
 
 ## Predico rules that shape the repo
