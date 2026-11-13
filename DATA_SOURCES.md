@@ -8,6 +8,7 @@ Every source used by open-predico, its license, and whether it may be used live.
 | [ENTSO-E Transparency Platform](https://transparency.entsoe.eu/) | mFRR balancing energy bids (12.3.B/C, File Library), group `mfrr_bids` | ENTSO-E Transparency Platform terms of use: reuse allowed with source attribution; to confirm 12.3.B/C is on ENTSO-E's free re-use list | to confirm | "Source: ENTSO-E Transparency Platform" | not yet | pending terms |
 | [ENTSO-E Transparency Platform](https://transparency.entsoe.eu/) REST API | 50Hertz truth and features (`data/entsoe.py`): actual generation A75 (B16 solar, B18 wind offshore, B19 wind onshore), group `target_50hertz`; day-ahead wind/solar (A69) and load (A65) forecasts, group `entsoe_forecasts_50hertz` | ENTSO-E Transparency Platform terms of use: reuse allowed with source attribution | to confirm (A75/A69/A65 on ENTSO-E's free re-use list, to check) | "Source: ENTSO-E Transparency Platform" | German targets | pending terms |
 | [Open-Meteo](https://open-meteo.com/) Previous Runs API | 50Hertz weather (`data/openmeteo.py`): wind 10/100 m, radiation, cloud cover, temperature as forecast 48 h ahead, group `weather_50hertz` | Data CC BY 4.0; the free API is non-commercial only | **licence required for production** (API subscription; the maintainer buys it before production) | "Weather data by Open-Meteo.com" | German targets (playground) | pending terms |
+| [Elia Open Data](https://opendata.elia.be/) | Belgian solar truth and Elia's forecast (`data/elia.py`): ods032 `measured`, `dayahead11h*`, region Belgium; groups `target_elia`, `tso_forecast_be` | Elia Open Data Licence (to read: portal was down on 2026-11-13) | to verify | "Source: Elia" | not yet (backtest) | pending terms |
 
 Add a row when you add a source.
 
@@ -48,3 +49,17 @@ which is truth-like). ECMWF runs are archived since March 2024; other models onl
 2026. Means over five land points (Brandenburg, Mecklenburg-Vorpommern, Saxony-Anhalt, Saxony,
 Thuringia) and two Baltic offshore points. One request per day for all points. Free tier:
 non-commercial; buy the API licence before production.
+
+Belgium (`weather_be`): one point per province (11), weighted by Elia's monitored PV capacity per
+province on 2026-10-25 (Flanders ~72%). Its 09:00 origin comes before the 00 UTC run lands, so it
+reads the 18 UTC run of D-2 (29 to 53 h ahead, out around 02:00 UTC).
+
+## Elia Open Data
+
+Solar, Belgium total, 15 min, MW, from the Explore v2.1 export endpoint (one request per field,
+no key). ods032 (historical, since 2020-10-01) stops at 2026-10-25: Elia moved solar to ods209
+(historical, `measured_upscaled`) and ods210 (near-real-time, `measured`), both split by
+`gridconnectiontype` (Total/TSO/DSO); ods087 (near-real-time) is discontinued. Predico's docs
+still name ods032 `measured` (settled) and ods087 `realtime`; check which one Predico scores
+before going live. `dayahead11h*` is Elia's forecast issued at 11:00 D-1, an hour after the
+10:00 gate; values carry the final version only (no vintages), so it is a benchmark, not an input.

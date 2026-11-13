@@ -32,6 +32,11 @@ def load_targets(path: Path = CONFIGS / "targets.toml") -> dict[str, dict]:
     return targets
 
 
+def live_targets() -> dict[str, dict]:
+    """The targets live/ submits, checks and publishes: all but those with `live = false`."""
+    return {n: t for n, t in load_targets().items() if t.get("live", True)}
+
+
 def _validate_target(name: str, t: dict) -> None:
     missing = TARGET_KEYS - t.keys()
     if missing:

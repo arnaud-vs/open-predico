@@ -173,6 +173,18 @@ its feature groups in `groups.toml`. Remaining Spain-specific code: `to_grid` (E
   2026-11-08, close to the 14:15 run; if they arrive late the run logs them as late (NaN). Switch
   `da_price_de` to ENTSO-E A44 (out by 13:16) if that happens.
 
+### Elia solar (`belgium_solar_opendata_elia`)
+
+- **Truth:** Predico's: Elia ods032 `measured`, region Belgium (`data/elia.py`). ods032 ends
+  2026-10-25 (test period ends there); live needs ods209/ods210 (DATA_SOURCES.md).
+- **Origin:** 09:00 Brussels for the 10:00 D+1 gate (hourly intraday sessions not covered).
+- **Capacity:** Elia monitored capacity 12.1 GW (2026-10-25), clip at 12.2 GW; max seen 8.6 GW.
+- **Features:** `target_elia` (past), `weather_be` (Open-Meteo IFS 18 UTC run of D-2, 11
+  province points weighted by PV capacity: future), `calendar`.
+- **Benchmark:** Elia's own forecast (`tso_forecast_be`, issued 11:00 D-1), Predico's owner
+  benchmark, scored as config `elia_dayahead11h` (`experiment ... tso`).
+- **Live:** not yet (`live = false` in targets.toml keeps it out of submit, check and publish).
+
 ## Predico rules that shape the repo
 
 - Only the maintainer holds Predico credentials. Contributors never need platform access.

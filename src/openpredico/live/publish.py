@@ -20,7 +20,7 @@ from datetime import datetime
 import pandas as pd
 from huggingface_hub import HfApi
 
-from openpredico.config import load_targets
+from openpredico.config import live_targets
 from openpredico.data import hf
 from openpredico.data.groups import fetch_source
 from openpredico.evaluation.backtest import PUBLICATION_LAG
@@ -49,7 +49,7 @@ def main() -> None:
     files = HfApi().list_repo_files(f"{hf.ORG}/live-private", repo_type="dataset")
     client, run_rows = Predico(), []
     HfApi().create_repo(f"{hf.ORG}/live", repo_type="dataset", private=False, exist_ok=True)
-    for name, t in load_targets().items():
+    for name, t in live_targets().items():
         runs, rows = {}, []
         # ponytail: re-downloads every run daily (~2 files/run); keep a cursor if it gets slow
         for f in sorted(f for f in files if f.startswith(f"forecasts/{name}/")):

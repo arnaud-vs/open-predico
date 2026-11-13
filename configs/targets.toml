@@ -72,3 +72,18 @@ timezone = "Europe/Berlin"
 origin = "14:00"
 gate = "15:00"
 test_period = ["2025-11-01", "2026-10-31"]
+
+[belgium_solar_opendata_elia]
+predico_resource = "belgium_solar_opendata_elia"
+truth = "elia:ods032.measured"  # Predico's truth: Elia ods032 `measured`, region Belgium
+column = "solar_be"
+groups = ["target_elia", "weather_be", "calendar"]
+unit = "MW"
+kind = "generation"
+capacity = 12200  # ponytail: Elia monitored capacity on 2026-10-25 (12128 MW); max seen 8559
+timezone = "Europe/Brussels"
+origin = "09:00"  # D+1 gate 10:00 Brussels (Predico's Elia program)
+gate = "10:00"
+test_period = ["2025-11-01", "2026-10-25"]  # ods032 ends 2026-10-25
+tso = "tso_forecast_be"  # group with Elia's q10/q50/q90, scored as config elia_dayahead11h
+live = false  # backtest only: live/ skips it (no live run, check or publish yet)

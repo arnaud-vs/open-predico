@@ -6,7 +6,8 @@ its group (e.g. the other Spain target) are past covariates. Predictions (with t
 truth as `obs`) go to `<out>/<config>/<target>.parquet`, ready for `evaluation.results`.
 `drop` leaves out comma-separated columns (ablation); `drop=all` keeps only the target history
 (univariate: no past, known-future or calendar covariates). `targets` limits the run to
-comma-separated targets. Repo `slot_climatology` runs that baseline over `context days`.
+comma-separated targets. Repo `slot_climatology` runs that baseline over `context days`; repo
+`tso` scores the TSO's published forecast (targets.toml `tso` group) instead of a model.
 
     python -m openpredico.evaluation.experiment <config> <repo> <context days> <out dir> \
         [<device>] [<drop>] [<origin HH:MM, local; default from targets.toml>] [<targets>]
@@ -95,7 +96,7 @@ def run(
     targets: str = "",
 ) -> None:
     frames = load_benchmark()
-    if repo != "slot_climatology":
+    if repo not in ("slot_climatology", "tso"):
         adapter = importlib.import_module(f"openpredico.models.tsfm.{ADAPTERS[repo.split('/')[0]]}")
         model = adapter.load(repo, device)
     for target, t in load_targets().items():
@@ -106,6 +107,16 @@ def run(
             continue
         history, future = features(frames, target, drop)
         days = pd.date_range(*t["test_period"], tz=t["timezone"])
+        if repo == "tso":  # the TSO's own forecast as published (targets.toml `tso`), not a model
+            if "tso" not in t:
+                continue
+            preds = frames[t["tso"]].set_axis(["q10", "q50", "q90"], axis=1)
+            preds = clip(preds[preds.index.tz_convert(t["timezone"]).normalize().isin(days)], t)
+            preds["obs"] = history[t["column"]]
+            preds.index.name = "time"
+            (out / config).mkdir(parents=True, exist_ok=True)
+            preds.to_parquet(out / config / f"{target}.parquet")
+            continue
         if repo == "slot_climatology":
 
             def predict(past, future, days, tz=t["timezone"]):

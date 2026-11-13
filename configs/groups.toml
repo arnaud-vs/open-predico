@@ -4,6 +4,7 @@
 #   source       "esios:<id>", "calendar:<name>" (computed), "entsoe_bids:<column>" (bid ladder)
 #                "entsoe:<document>_<psr>" (ENTSO-E REST API, data/entsoe.py)
 #                or "openmeteo:<area>.<variable>" (weather forecasts, data/openmeteo.py)
+#                or "elia:<dataset>.<field>" (Elia Open Data, Belgium total, data/elia.py)
 #   geo          ESIOS geo_id, for indicators published for several geos
 #   fill         value for missing quarter-hours (none = keep NaN)
 #   availability "future" = known for the target day before the gate
@@ -113,3 +114,21 @@ temperature_2m = { source = "openmeteo:land.temperature_2m", availability = "fut
 
 [calendar_de]
 holiday_de = { source = "calendar:holiday_de", availability = "future" }
+
+# --- Belgium (Elia Open Data): belgium_solar_opendata_elia ---
+[target_elia]  # Elia's measured PV, Belgium total, MW: Predico's truth
+solar_be = { source = "elia:ods032.measured", availability = "past" }
+
+[weather_be]  # Open-Meteo ECMWF IFS, 18 UTC run of D-2, capacity-weighted over 11 provinces
+ghi_be = { source = "openmeteo:be.shortwave_radiation", availability = "future" }  # W/m2
+direct_radiation_be = { source = "openmeteo:be.direct_radiation", availability = "future" }
+diffuse_radiation_be = { source = "openmeteo:be.diffuse_radiation", availability = "future" }
+cloud_cover_be = { source = "openmeteo:be.cloud_cover", availability = "future" }  # %
+temperature_2m_be = { source = "openmeteo:be.temperature_2m", availability = "future" }  # °C
+
+# Elia's own forecast (Predico's benchmark), scored as config `elia_dayahead11h`: not a model
+# input. Published 11:00 D-1, an hour after the gate.
+[tso_forecast_be]
+tso_q10_be = { source = "elia:ods032.dayahead11hconfidence10", availability = "past" }
+tso_q50_be = { source = "elia:ods032.dayahead11hforecast", availability = "past" }
+tso_q90_be = { source = "elia:ods032.dayahead11hconfidence90", availability = "past" }

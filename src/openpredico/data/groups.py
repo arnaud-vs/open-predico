@@ -13,12 +13,12 @@ import pandas as pd
 from dateutil.easter import easter
 
 from openpredico.config import CONFIGS, load_targets
-from openpredico.data import entsoe, entsoe_bids, esios, hf, openmeteo
+from openpredico.data import elia, entsoe, entsoe_bids, esios, hf, openmeteo
 
 TZ = "Europe/Madrid"  # ESIOS local time; calendar default (Spain's targets)
 COLUMN_KEYS = {"source", "geo", "fill", "availability"}
 AVAILABILITY = {"future", "past"}
-PREFIXES = {"esios", "calendar", "entsoe_bids", "entsoe", "openmeteo"}
+PREFIXES = {"esios", "calendar", "entsoe_bids", "entsoe", "openmeteo", "elia"}
 # ponytail: bid ladder built locally by `entsoe_bids ladder` (File Library login needed), not
 # fetched here. Put it at this path before building the `mfrr_bids` group.
 BIDS_LADDER = CONFIGS.parent / "data" / "bids_ladder.parquet"
@@ -75,12 +75,16 @@ def _column(c: dict, raw: dict, grid: pd.DatetimeIndex, start, end, tz: str) -> 
         return CALENDAR[key](grid, tz)
     if prefix == "entsoe_bids":
         return entsoe_bids.to_series(key, BIDS_LADDER).reindex(grid)
-    if prefix == "entsoe":
-        return entsoe.fetch(key, start, end)  # already on the grid
+    if prefix in ("entsoe", "elia"):
+        return fetch_source(c["source"], start, end)  # already on the grid
     if prefix == "openmeteo":
         area, variable = key.split(".")
-        # one request per day for every area and variable
-        return _once(raw, prefix, lambda: openmeteo.fetch(start, end))[area][variable]
+        # one request per day for every area and variable of the same run
+        run = openmeteo.EARLIER.get(area)
+        areas = [a for a in openmeteo.POINTS if openmeteo.EARLIER.get(a) == run]
+        return _once(raw, f"{prefix}{run}", lambda: openmeteo.fetch(start, end, areas))[area][
+            variable
+        ]
     values = _once(raw, key, lambda: esios.fetch_values(int(key), start, end))
     return to_grid(esios.to_series(values, int(key), c.get("geo"), start, end), grid)
 
@@ -98,12 +102,14 @@ def _once(raw: dict, key: str, fetch):
 
 
 def fetch_source(source: str, start: str, end: str) -> pd.Series:
-    """One `esios:<id>` or `entsoe:<key>` series over UTC [start, end), native resolution."""
+    """One `esios:`, `entsoe:` or `elia:` series over UTC [start, end), native resolution."""
     prefix, key = source.split(":")
     if prefix == "esios":
         return esios.fetch(int(key), start, end)
     if prefix == "entsoe":
         return entsoe.fetch(key, start, end)
+    if prefix == "elia":
+        return elia.fetch(key, start, end)
     raise ValueError(f"no fetcher for source {source!r}")
 
 

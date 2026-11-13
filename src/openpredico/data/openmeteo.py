@@ -30,7 +30,26 @@ POINTS = {  # area -> [(lat, lon)]
         (51.0, 11.1),  # Thuringia
     ],
     "offshore": [(54.8, 14.1), (54.6, 12.65)],  # Baltic: Arkona / Baltic 2, Baltic 1
+    "be": [  # one point per Belgian province (Elia ods032 regions)
+        (51.22, 4.62),  # Antwerp
+        (50.99, 5.45),  # Limburg
+        (51.03, 3.80),  # East Flanders
+        (51.05, 3.05),  # West Flanders
+        (50.88, 4.55),  # Flemish Brabant
+        (50.85, 4.35),  # Brussels
+        (50.67, 4.58),  # Walloon Brabant
+        (50.47, 3.95),  # Hainaut
+        (50.33, 4.85),  # Namur
+        (50.53, 5.70),  # Liège
+        (49.95, 5.50),  # Luxembourg
+    ],
 }
+# Weighted means (else plain): Elia's monitored PV capacity per province, MW, on 2026-10-25.
+# ponytail: fixed weights; capacity grows a few % a year, mostly in Flanders.
+WEIGHTS = {"be": [2029, 1565, 2040, 1912, 1168, 331, 358, 1058, 445, 854, 368]}
+# Belgium's 09:00 origin (10:00 gate) comes before the 00 UTC run lands (~08:00 UTC): its areas
+# read the 18 UTC run of D-2 (29 to 53 h ahead) instead.
+EARLIER = {"be": pd.Timedelta(hours=6)}
 VARIABLES = [
     "wind_speed_100m",
     "wind_speed_10m",
@@ -42,8 +61,8 @@ VARIABLES = [
 ]
 PRECEDING_HOUR = {"shortwave_radiation", "direct_radiation", "diffuse_radiation"}  # hour means
 STEP = pd.Timedelta("15min")
-# A request costs one call per point (7). Free tier: 5000 calls/h. The live run (~92 days) can
-# use 1 s; a backfill of hundreds of days sets PAUSE = 6 (~4200 calls/h).
+# A request costs one call per point (7, or 11 for "be"). Free tier: 5000 calls/h. The live run
+# (~92 days) can use 1 s; a backfill of hundreds of days sets PAUSE = 6 (~4200 calls/h; "be": 9).
 PAUSE = 1
 _session = requests.Session()
 _session.mount(
@@ -55,13 +74,17 @@ _session.mount(
 )
 
 
-def fetch(start: pd.Timestamp, end: pd.Timestamp) -> dict[str, pd.DataFrame]:
-    """Per area, VARIABLES averaged over its points on the 15-min UTC grid [start, end)."""
+def fetch(start: pd.Timestamp, end: pd.Timestamp, areas=None) -> dict[str, pd.DataFrame]:
+    """Per area, VARIABLES averaged over its points on the 15-min UTC grid [start, end).
+
+    `areas` (default: those reading the 00 UTC run) must share one run (EARLIER).
+    """
+    areas = areas or [a for a in POINTS if a not in EARLIER]
     grid = pd.date_range(start, end, freq=STEP, inclusive="left", name="time")
     days = pd.date_range(grid[0].tz_convert(TZ).normalize(), grid[-1].tz_convert(TZ), freq="D")
-    parts = {area: [] for area in POINTS}
+    parts = {area: [] for area in areas}
     for day in days:
-        for area, hourly in _run(day).items():
+        for area, hourly in _run(day, areas).items():
             parts[area].append(hourly)
         time.sleep(PAUSE)
     out = {}
@@ -71,14 +94,15 @@ def fetch(start: pd.Timestamp, end: pd.Timestamp) -> dict[str, pd.DataFrame]:
     return out
 
 
-def run_time(day: pd.Timestamp) -> pd.Timestamp:
-    """The run a local target day reads: 00 UTC on the local day before."""
-    return pd.Timestamp(f"{day - pd.Timedelta(days=1):%Y-%m-%d}", tz="UTC")
+def run_time(day: pd.Timestamp, area: str = "land") -> pd.Timestamp:
+    """The run a local target day reads: 00 UTC on the local day before, or EARLIER."""
+    run = pd.Timestamp(f"{day - pd.Timedelta(days=1):%Y-%m-%d}", tz="UTC")
+    return run - EARLIER.get(area, pd.Timedelta(0))
 
 
-def _run(day: pd.Timestamp) -> dict[str, pd.DataFrame]:
-    """Hourly forecasts of `run_time(day)` for the hours of local `day`, mean per area."""
-    points = [p for ps in POINTS.values() for p in ps]
+def _run(day: pd.Timestamp, areas: list[str]) -> dict[str, pd.DataFrame]:
+    """Hourly forecasts of the areas' run for the hours of local `day`, mean per area."""
+    points = [p for a in areas for p in POINTS[a]]
     resp = _session.get(
         BASE_URL,
         params={
@@ -86,8 +110,8 @@ def _run(day: pd.Timestamp) -> dict[str, pd.DataFrame]:
             "longitude": ",".join(str(p[1]) for p in points),
             "hourly": ",".join(VARIABLES),
             "models": MODEL,
-            "run": f"{run_time(day):%Y-%m-%dT%H:%M}",
-            "forecast_days": 3,  # covers the local day after the run day, plus an hour
+            "run": f"{run_time(day, areas[0]):%Y-%m-%dT%H:%M}",
+            "forecast_days": 3,  # covers the local target day, plus an hour
             "timezone": "GMT",
             "wind_speed_unit": "ms",
         },
@@ -98,14 +122,17 @@ def _run(day: pd.Timestamp) -> dict[str, pd.DataFrame]:
     locations = locations if isinstance(locations, list) else [locations]
     out, i = {}, 0
     lo, hi = day.tz_convert("UTC"), (day + pd.DateOffset(days=1)).tz_convert("UTC")
-    for area, ps in POINTS.items():
-        frames = []
+    for area in areas:
+        ps, frames = POINTS[area], []
         for loc in locations[i : i + len(ps)]:
             df = pd.DataFrame(loc["hourly"])
             df.index = pd.to_datetime(df.pop("time"), utc=True)
             for v in PRECEDING_HOUR & set(df):  # the 10:00 value is the 09:00-10:00 mean
                 df[v] = df[v].shift(-1)
             frames.append(df[(df.index >= lo) & (df.index < hi)])
-        out[area] = pd.concat(frames).groupby(level=0).mean()
+        if w := WEIGHTS.get(area):
+            out[area] = sum(f * k for f, k in zip(frames, w, strict=True)) / sum(w)
+        else:
+            out[area] = pd.concat(frames).groupby(level=0).mean()
         i += len(ps)
     return out

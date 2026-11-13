@@ -32,7 +32,7 @@ MARKETS = {
     "de-solar": {"germany_solar_50hertz_ca": "solar"},
 }
 SHORT = {target: short for m in MARKETS.values() for target, short in m.items()}
-UNITS = {SHORT[name]: t["unit"] for name, t in load_targets().items()}
+UNITS = {SHORT[n]: t["unit"] for n, t in load_targets().items() if n in SHORT}  # shown
 # Input features tab outside Spain (Spain shows the ESIOS catalog): entsoe source descriptions.
 ENTSOE = {"A75": "actual generation", "A69": "day-ahead forecast", "A65": "day-ahead load forecast"}
 PSR = {"B16": "solar", "B18": "wind offshore", "B19": "wind onshore"}

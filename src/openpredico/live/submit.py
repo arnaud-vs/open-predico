@@ -12,7 +12,7 @@ from collections.abc import Callable
 import pandas as pd
 from huggingface_hub import HfApi
 
-from openpredico.config import load_targets
+from openpredico.config import live_targets
 from openpredico.data import hf
 from openpredico.data.groups import build
 from openpredico.evaluation.backtest import PUBLICATION_LAG, clip
@@ -46,7 +46,7 @@ def forecast(
     target: str, frames: dict[str, pd.DataFrame], predict: Callable, now: pd.Timestamp
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """(forecast D+1..D+10 within 240 h, exact model inputs). Same cut as the backtest."""
-    t = load_targets()[target]
+    t = live_targets()[target]
     tz = t["timezone"]
     # ponytail: the >90%-missing column drop is decided on the live window, not the backtest's
     history, future_cols = features(frames, target)
@@ -81,7 +81,7 @@ def validate(fc: pd.DataFrame, now: pd.Timestamp) -> None:
 def main(dry_run: bool, only: list[str] | None = None) -> None:
     """Submit every target, or only the targets named in `only`."""
     now = pd.Timestamp.now(tz="UTC")
-    targets = {n: t for n, t in load_targets().items() if not only or n in only}
+    targets = {n: t for n, t in live_targets().items() if not only or n in only}
     if unknown := set(only or ()) - targets.keys():
         sys.exit(f"unknown targets: {sorted(unknown)}")
     client = None if dry_run else Predico()  # log in first: fail fast on bad credentials
@@ -124,7 +124,7 @@ def hindcast(first: str, last: str, only: list[str]) -> None:
     predict = t0.make_predict(t0.load(MODEL), CONTEXT_DAYS, CATEGORICAL)
     built = {}  # (groups, tz) -> frames: the Spain targets share one build
     for name in only:
-        t = load_targets()[name]
+        t = live_targets()[name]
         tz = t["timezone"]
         days = pd.date_range(first, last, tz=tz)
         nows = [
@@ -148,7 +148,7 @@ def hindcast(first: str, last: str, only: list[str]) -> None:
 def in_session(now: pd.Timestamp) -> list[str]:
     """Targets whose D+1 session is open now: the hour before their gate, local time."""
     out = []
-    for name, t in load_targets().items():
+    for name, t in live_targets().items():
         local = now.tz_convert(t["timezone"])
         gate = pd.Timestamp(f"{local:%Y-%m-%d} {t['gate']}").tz_localize(t["timezone"])
         if gate - pd.Timedelta("1h") <= local < gate:
@@ -159,7 +159,7 @@ def in_session(now: pd.Timestamp) -> list[str]:
 def not_ready(client: Predico) -> list[str]:
     """Our targets with an open challenge that our forecasts don't fully cover yet."""
     ready = {c["challenge_id"]: c["ready"] for c in client.coverage()["data"]["coverage"]}
-    names = [t["predico_resource"] for t in load_targets().values()]
+    names = [t["predico_resource"] for t in live_targets().values()]
     return [
         c["resource_name"]
         for n in names
@@ -182,7 +182,7 @@ def not_run(now: pd.Timestamp, files: list[str]) -> list[str]:
 
 def missing(client: Predico, now: pd.Timestamp) -> list[str]:
     """Targets to resubmit: not covered on Predico, or no t0 run of ours today."""
-    by_resource = {t["predico_resource"]: n for n, t in load_targets().items()}
+    by_resource = {t["predico_resource"]: n for n, t in live_targets().items()}
     files = HfApi().list_repo_files(f"{hf.ORG}/live-private", repo_type="dataset")
     pending = {by_resource[r] for r in not_ready(client)} | set(not_run(now, files))
     if pair_needs_retry(now, files):
