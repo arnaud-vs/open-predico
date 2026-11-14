@@ -12,7 +12,7 @@
 :root {
   --surface: #ffffff; --bg: #f6f8f8; --ink: #0d0d0d; --ink-soft: #5a5f66; --line: #e6e8eb; --grid: #eff1f3;
   --accent: #53cdcd; --accent-ink: #0e7d7e; --accent-wash: rgba(83, 205, 205, 0.14);
-  --band: rgba(83, 205, 205, 0.2); --cont: #0e7d7e; --sub: rgba(83, 205, 205, 0.55); --obs: #0d0d0d; --base: #b7791f;
+  --band: rgba(83, 205, 205, 0.2); --cont: #0e7d7e; --sub: rgba(83, 205, 205, 0.55); --obs: #0d0d0d; --base: #b7791f; --pg: rgba(120, 120, 140, 0.12);
   --good: #0e7d7e; --bad: #c2456b; --warn: #b7791f; --future: rgba(13, 13, 13, 0.035);
   --gold: #d9b13b; --silver: #a7b0b8; --bronze: #c0844f;
   --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -22,14 +22,14 @@
   :root:not([data-theme="light"]) {
     --surface: #131617; --bg: #0b0d0e; --ink: #eef1f2; --ink-soft: #9aa1a8; --line: #252a2e; --grid: #1b1f22;
     --accent: #53cdcd; --accent-ink: #6fd8d8; --accent-wash: rgba(83, 205, 205, 0.12);
-    --band: rgba(83, 205, 205, 0.18); --cont: #9fe8e8; --sub: rgba(83, 205, 205, 0.45); --obs: #f3f5f6; --base: #e0a447;
+    --band: rgba(83, 205, 205, 0.18); --cont: #9fe8e8; --sub: rgba(83, 205, 205, 0.45); --obs: #f3f5f6; --base: #e0a447; --pg: rgba(200, 200, 220, 0.08);
     --good: #53cdcd; --bad: #ef7a9c; --warn: #e3a64a; --future: rgba(255, 255, 255, 0.035); color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --surface: #131617; --bg: #0b0d0e; --ink: #eef1f2; --ink-soft: #9aa1a8; --line: #252a2e; --grid: #1b1f22;
   --accent: #53cdcd; --accent-ink: #6fd8d8; --accent-wash: rgba(83, 205, 205, 0.12);
-  --band: rgba(83, 205, 205, 0.18); --cont: #9fe8e8; --sub: rgba(83, 205, 205, 0.45); --obs: #f3f5f6; --base: #e0a447;
+  --band: rgba(83, 205, 205, 0.18); --cont: #9fe8e8; --sub: rgba(83, 205, 205, 0.45); --obs: #f3f5f6; --base: #e0a447; --pg: rgba(200, 200, 220, 0.08);
   --good: #53cdcd; --bad: #ef7a9c; --warn: #e3a64a; --future: rgba(255, 255, 255, 0.035); color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -125,6 +125,8 @@ td.desc { min-width: 280px; color: var(--ink-soft); }
 .day.sub { background: var(--sub); border-color: var(--sub); color: var(--ink); }
 .day.cont { background: var(--surface); border: 2px dotted var(--cont); color: var(--ink); }
 .day.miss { background: repeating-linear-gradient(45deg, var(--grid) 0 3px, var(--surface) 3px 6px); }
+.day.pg { opacity: 0.55; }
+tr.pg td { color: var(--ink-soft); }
 .heat { display: grid; grid-template-columns: 64px repeat(31, minmax(10px, 1fr)); gap: 2px; font: 10px var(--mono); color: var(--ink-soft); min-width: 520px; }
 .heat div { aspect-ratio: 1; border-radius: 2px; }
 .heat .lab { aspect-ratio: auto; align-self: center; }

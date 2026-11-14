@@ -116,6 +116,23 @@ const seriesRows = fmtX => (u, idx) => {
 function line(label, color, opts = {}) {
   return { label, tt: label, stroke: color, _color: color, width: 2, points: { show: false }, ...opts };
 }
+// Shades [start, end) spans (seconds) behind the series: the playground days.
+function shade(spans) {
+  return {
+    hooks: {
+      drawAxes: u => {
+        const { left, top, width, height } = u.bbox;
+        u.ctx.save(); u.ctx.fillStyle = css("--pg");
+        for (const [a, b] of spans) {
+          const x0 = Math.max(u.valToPos(a, "x", true), left), x1 = Math.min(u.valToPos(b, "x", true), left + width);
+          if (x1 > x0) u.ctx.fillRect(x0, top, x1 - x0, height);
+        }
+        u.ctx.restore();
+      },
+    },
+  };
+}
+
 function nowMarker(nowSec) {
   return {
     hooks: {
@@ -225,14 +242,17 @@ async function renderLive(root) {
     }
     const record = [...dayInfo.values()];
     const counts = { sub: 0, cont: 0, miss: 0 };
-    for (const d of record) d.state = d.rows === 0 ? "miss" : d.sub ? "sub" : "cont";
+    for (const d of record) { d.state = d.rows === 0 ? "miss" : d.sub ? "sub" : "cont"; d.pg = T.env_days?.[d.key] === "playground"; }
+    const pgDays = record.filter(d => d.pg), PG = "* playground: qualifying runs on the Predico playground, never scored by Predico";
     record.forEach(d => counts[d.state]++);
     const STATE = { sub: "submitted", cont: "not submitted", miss: "no forecast" };
     const envNote = live.demo
       ? `<div class="banner"><b>Demo data.</b> No live forecasts are published yet, so this shows the last 21 backtest days of <span class="mono">${esc(T.model)}</span> in the live format.</div>`
       : T.env === "playground"
         ? `<div class="banner"><b>Qualifying on the Predico playground.</b> Production submissions open after five good days; scores below are playground runs.</div>`
-        : "";
+        : pgDays.length
+          ? `<div class="banner">Days marked <b>*</b> (shaded in the chart) were qualifying runs on the Predico playground, before production; Predico never scored them.</div>`
+          : "";
     const body = root.querySelector("#lv-body");
     body.innerHTML = `${envNote}
       <div class="card">
@@ -255,8 +275,8 @@ async function renderLive(root) {
         <div id="lv-off"></div></div>
       <div class="grid2">
         <div class="card"><div class="card-head"><div><h2>Submission record</h2><p class="sub">One square per target day (${m.city}). Click a day to show it in the chart.</p></div></div>
-          <div class="days" id="lv-days">${record.map(d => `<button class="day ${d.state}" data-k="${d.key}" title="${fmtDay(d.key)}: ${STATE[d.state]}">${+d.key.slice(8)}</button>`).join("")}</div>
-          <div class="legend"><span class="chip static"><b class="good">■</b> submitted · ${counts.sub}</span><span class="chip static">⋯ not submitted · ${counts.cont}</span><span class="chip static">▨ missed · ${counts.miss}</span></div>
+          <div class="days" id="lv-days">${record.map(d => `<button class="day ${d.state}${d.pg ? " pg" : ""}" data-k="${d.key}" title="${fmtDay(d.key)}: ${STATE[d.state]}${d.pg ? " (playground)" : ""}">${+d.key.slice(8)}${d.pg ? "*" : ""}</button>`).join("")}</div>
+          <div class="legend"><span class="chip static"><b class="good">■</b> submitted · ${counts.sub}</span><span class="chip static">⋯ not submitted · ${counts.cont}</span><span class="chip static">▨ missed · ${counts.miss}</span>${pgDays.length ? `<span class="chip static" title="${PG}">* playground · ${pgDays.length}</span>` : ""}</div>
         </div>
         <div class="card"><div class="card-head"><div><h2>Model and inputs</h2><p class="sub">Latest run ${esc(T.last_run.slice(0, 16).replace("T", " "))} UTC · ${T.runs} run${T.runs === 1 ? "" : "s"} published</p></div><span class="pill ${T.env === "production" ? "" : "warn"}">${esc(T.env)}</span></div>
           <p><span class="mono">${esc(T.model)}</span>: t0-gamma (The Forecasting Company, Apache-2.0), zero-shot, 90 days of context, with covariates. D+2 to D+10 fall back to slot climatology. <a href="#backtest">Backtest results</a></p>
@@ -290,14 +310,14 @@ async function renderLive(root) {
       bands: [{ series: [2, 1], fill: css("--band") }],
       axes: axes(`${LABEL[target]} (${unit})`),
       hooks: { setScale: [(u, k) => k === "x" && summary(u.scales.x.min, u.scales.x.max)] },
-      plugins: [nowMarker(Date.now() / 1000), tooltip((u, i) => {
+      plugins: [shade(pgDays.map(d => [x[d.i0], x[d.i1] + STEP])), nowMarker(Date.now() / 1000), tooltip((u, i) => {
         const rows = [], on = k => u.series[k].show;
         if (on(6) && T.obs[i] != null) rows.push([css("--obs"), "Observed", `${f1(T.obs[i])} ${unit}`]);
         if (on(3) && s50[i] != null) rows.push([css("--sub"), "Submitted", `${f1(s50[i])} ${unit}`]);
         if (on(4) && T.q50[i] != null) rows.push([css("--cont"), "Model", `${f1(T.q50[i])} ${unit}`, true]);
         if (on(1) && e10[i] != null) rows.push([css("--accent"), "q10–q90", `${f1(e10[i])} … ${f1(e90[i])}`]);
         if (on(5) && T.b50[i] != null) rows.push([css("--base"), "Climatology", `${f1(T.b50[i])} ${unit}`]);
-        return rows.length ? ttHTML(fmtUTC(x[i]), rows) : null;
+        return rows.length ? ttHTML(fmtUTC(x[i]) + (dayInfo.get(madrid(x[i]).day)?.pg ? " · playground" : ""), rows) : null;
       })],
     }, data, root.querySelector("#lv-chart")), chartHeight);
     main.keepX = true;
@@ -352,7 +372,7 @@ async function renderLive(root) {
       <tr><th rowspan="2">Day</th><th rowspan="2">Status</th><th class="n" colspan="3">RMSE (${unit})</th><th class="n" colspan="3">MAE (${unit})</th><th class="n" colspan="3">Winkler (${unit})</th><th class="n" colspan="2">Coverage</th></tr>
       <tr>${["ours", "clim.", "ratio", "ours", "clim.", "ratio", "ours", "clim.", "ratio", "ours", "clim."].map(h => `<th class="n">${h}</th>`).join("")}</tr></thead><tbody>${[...record].reverse().map(r => {
         const d = scoredDay.get(r.key), b = base.get(r.key);
-        return `<tr class="click" data-k="${r.key}"><td class="mono">${fmtDay(r.key)}</td><td><span class="pill ${r.state === "sub" ? "" : r.state === "cont" ? "warn" : "muted"}">${STATE[r.state]}</span></td>${d ? cell(d, b, "rmse", f1) + cell(d, b, "mae", f1) + cell(d, b, "winkler", f1) + cell(d, b, "coverage", pct) : `<td class="muted" colspan="11">${r.state === "miss" ? "no forecast" : "awaiting measurements"}</td>`}</tr>`;
+        return `<tr class="click${r.pg ? " pg" : ""}" data-k="${r.key}"><td class="mono">${fmtDay(r.key)}${r.pg ? `<span title="${PG}">*</span>` : ""}</td><td><span class="pill ${r.state === "sub" ? "" : r.state === "cont" ? "warn" : "muted"}">${STATE[r.state]}${r.pg ? " · playground" : ""}</span></td>${d ? cell(d, b, "rmse", f1) + cell(d, b, "mae", f1) + cell(d, b, "winkler", f1) + cell(d, b, "coverage", pct) : `<td class="muted" colspan="11">${r.state === "miss" ? "no forecast" : "awaiting measurements"}</td>`}</tr>`;
       }).join("")}</tbody></table>`;
     root.querySelector("#lv-daily").addEventListener("click", e => { const tr = e.target.closest("tr[data-k]"); if (tr) zoomDay(tr.dataset.k); });
   }

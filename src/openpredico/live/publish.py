@@ -6,7 +6,8 @@ dashboard shows them as missed). Rebuilt from `live-private` on every run, so it
 
     forecasts/<target>.parquet  q10/q50/q90, model, env, run: our continuous forecast as sliced
                                 at the gate; s10/s50/s90: what Predico registered as our session
-                                submissions (also days from before the HF record); obs; b10/b50/b90
+                                submissions, production or else playground (also days from
+                                before the HF record); obs; b10/b50/b90
                                 (slot climatology from the same run's inputs, the baseline)
     scores/<target>.parquet     Predico's official scores of our submissions per day, variable
                                 and metric, with our rank and the number of participants
@@ -47,7 +48,7 @@ def scored(runs: dict[pd.Timestamp, pd.DataFrame], tz: str, gate: str, now: pd.T
 def main() -> None:
     now = pd.Timestamp.now(tz="UTC")
     files = HfApi().list_repo_files(f"{hf.ORG}/live-private", repo_type="dataset")
-    client, run_rows = Predico(), []
+    client, playground, run_rows = Predico(), Predico("PREDICO_PLAYGROUND_URL"), []
     HfApi().create_repo(f"{hf.ORG}/live", repo_type="dataset", private=False, exist_ok=True)
     for name, t in live_targets().items():
         runs, rows = {}, []
@@ -74,7 +75,10 @@ def main() -> None:
             )
         out = scored(runs, t["timezone"], t["gate"], now) if runs else pd.DataFrame()
         challenges = client.our_challenges(t["predico_resource"])
-        sub = client.submitted_forecasts(challenges)
+        # production first; playground (qualifying, never scored) fills the days before it
+        sub = client.submitted_forecasts(challenges).combine_first(
+            playground.submitted_forecasts(playground.our_challenges(t["predico_resource"]))
+        )
         sub = sub[gate_closes(sub.index, t["timezone"], t["gate"]) <= now]  # never an open day
         sub = sub.rename(columns=lambda c: "s" + c[1:])  # q50 -> s50
         out = sub if out.empty else out.join(sub, how="outer")

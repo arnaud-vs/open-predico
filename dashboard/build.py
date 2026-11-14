@@ -72,6 +72,8 @@ def backtest(out: Path) -> dict:
     days, profiles, grid = {}, {}, None
     for f in sorted(files):
         config, target = f.removeprefix(PREFIX).removesuffix(".parquet").split("/")
+        if target not in SHORT:
+            continue  # no dashboard market yet (Belgium solar)
         t, tz = SHORT[target], load_targets()[target]["timezone"]
         df = download("benchmark", f)
         grid = df.index if grid is None else grid
@@ -205,6 +207,14 @@ def official(target: str, demo: bool, days: list[str]) -> list[dict]:
     return json.loads(df.round(3).to_json(orient="records"))
 
 
+def env_days(g: pd.DataFrame) -> dict[str, str]:
+    """Environment per Madrid target day: days before the first production run's day were
+    playground (qualifying; hindcast runs only fill in the forecast for those days)."""
+    day = pd.Series(g.index.tz_convert("Europe/Madrid").strftime("%Y-%m-%d"), index=g.index)
+    first = min(day[g.env == "production"], default="9999")
+    return {d: "playground" if d < first else "production" for d in day.unique()}
+
+
 def live(out: Path, demo: bool) -> None:
     frames, runs = live_frames(demo)
     if runs is None:
@@ -222,6 +232,8 @@ def live(out: Path, demo: bool) -> None:
             **{c: arr(g[c]) for c in LIVE_COLUMNS},
             "model": last.model,
             "env": str(df.env.dropna().iloc[-1]) if "env" in df else "playground",
+            # per target day: playground days are marked on the page (never scored by Predico)
+            "env_days": env_days(g),
             "runs": len(target_runs),
             "last_run": str(last.run),
             "features": [f for f in str(last.features).split(",") if f],

@@ -15,8 +15,8 @@ URL_VAR = "PREDICO_URL"
 
 
 class Predico:
-    def __init__(self) -> None:
-        url = os.environ[URL_VAR]  # no silent fallback to production
+    def __init__(self, url_var: str = URL_VAR) -> None:
+        url = os.environ[url_var]  # no silent fallback to production
         self.api = ("" if "://" in url else "https://") + url.rstrip("/") + "/api/v1"
         resp = requests.post(
             f"{self.api}/token",
