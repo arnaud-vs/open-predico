@@ -23,18 +23,19 @@ image = (
     .add_local_dir("dashboard", "/dashboard", ignore=["data", "__pycache__"])
 )
 app = modal.App("open-predico", image=image, secrets=[modal.Secret.from_name("open-predico")])
-# Each target's D+1 session opens the hour before its gate (Spain 17:00, Germany 15:00, Predico:
-# "CET"). Every job runs in both session hours and acts on what is open, so all targets share
-# three crons (Starter plan: 5). Madrid and Berlin share their UTC offsets.
+# Each target's D+1 session opens the hour before its gate (Belgium 10:00, Germany 15:00, Spain
+# 17:00, Predico: "CET"). Every job runs in each session hour and acts on what is open, so all
+# targets share three crons (Starter plan: 5). Madrid, Berlin and Brussels share UTC offsets.
 # ponytail: assumes the gates follow local time in summer; check `gate_closure` in CEST.
 TZ = "Europe/Madrid"
 
 
 @app.function(
-    schedule=modal.Cron("15 14,16 * * *", timezone=TZ), cpu=1.0, memory=4096, timeout=1800
+    schedule=modal.Cron("15 9,14,16 * * *", timezone=TZ), cpu=1.0, memory=4096, timeout=1800
 )
 def submit() -> None:
-    """Forecast and submit the targets whose session is open (Germany 14:15, Spain 16:15)."""
+    """Forecast and submit the targets whose session is open (Belgium 09:15, Germany 14:15, Spain
+    16:15)."""
     import pandas as pd
 
     from openpredico.live import submit
@@ -46,7 +47,7 @@ def submit() -> None:
 
 
 @app.function(
-    schedule=modal.Cron("30,45 14,16 * * *", timezone=TZ), cpu=1.0, memory=4096, timeout=900
+    schedule=modal.Cron("30,45 9,14,16 * * *", timezone=TZ), cpu=1.0, memory=4096, timeout=900
 )
 def check() -> None:
     """Resubmit the targets whose open challenge isn't covered (their submit run failed)."""
@@ -57,7 +58,10 @@ def check() -> None:
 
 @app.function(
     # 15:30 and 17:30 follow the gates; 09:30 and 21:30 pick up Predico scores that land later
-    schedule=modal.Cron("30 9,15,17,21 * * *", timezone=TZ), cpu=1.0, memory=2048, timeout=1800
+    schedule=modal.Cron("30 9,15,17,21 * * *", timezone=TZ),
+    cpu=1.0,
+    memory=2048,
+    timeout=1800,
 )
 def publish() -> None:
     """Half an hour after each gate: publish what Predico scored, then rebuild the dashboard."""

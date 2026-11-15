@@ -8,6 +8,7 @@ push the static Space. The page only draws: every score here uses evaluation/met
 
 import argparse
 import json
+import re
 from pathlib import Path
 
 import numpy as np
@@ -30,6 +31,7 @@ MARKETS = {
     "es-mfrr": {"spain_mfrr_energy": "energy", "spain_mfrr_price": "price"},
     "de-wind": {"germany_wind_50hertz_ca": "wind"},
     "de-solar": {"germany_solar_50hertz_ca": "solar"},
+    "be-solar": {"belgium_solar_opendata_elia": "solar_be"},
 }
 SHORT = {target: short for m in MARKETS.values() for target, short in m.items()}
 UNITS = {SHORT[n]: t["unit"] for n, t in load_targets().items() if n in SHORT}  # shown
@@ -42,6 +44,9 @@ TYPES = {  # config name prefix -> model type; anything else is ML
     "timesfm": "foundation model",
     "timestral": "foundation model",
     "t0": "foundation model",
+    "ciproto": "foundation model",
+    "timeh2o": "foundation model",
+    "elia": "TSO forecast",
 }
 STEP = pd.Timedelta("15min")
 LIVE_COLUMNS = ("q10", "q50", "q90", "s10", "s50", "s90", "obs", "b10", "b50", "b90")
@@ -105,7 +110,16 @@ def backtest(out: Path) -> dict:
         "start": secs(grid[0]),
         "n": len(grid),
         "configs": [
-            {"name": c, "type": next((v for k, v in TYPES.items() if c.startswith(k)), "ML")}
+            {
+                "name": c,
+                "type": next((v for k, v in TYPES.items() if c.startswith(k)), "ML"),
+                # context days from the config name (`ctx90`, `climatology_28d`), else None
+                "context": int(m[1])
+                if (m := re.search(r"ctx(\d+)|_(\d+)d\b", c)) and m[1]
+                else int(m[2])
+                if m
+                else None,
+            }
             for c in configs
         ],
     }
@@ -130,7 +144,11 @@ def describe(source: str, names: dict) -> str:
         return f"ENTSO-E {document} {ENTSOE[document]} ({what}), 50Hertz control area"
     if prefix == "openmeteo":
         area, variable = key.split(".")
-        return f"Open-Meteo {variable}, forecast 48 h ahead, mean over the {area} points"
+        model = "ICON-D2 03 UTC" if area.endswith("_d2") else "ECMWF IFS 00 UTC"
+        how = "capacity-weighted mean" if area.startswith("be") else "mean"
+        return f"Open-Meteo {variable}, {model} run of D-1, {how} over the {area} points"
+    if prefix == "elia":
+        return f"Elia Open Data {key.split('.')[1]}, Belgium total (ods032, then ods209/ods210)"
     if prefix == "calendar":
         return CALENDAR[key]
     return names.get((prefix, key), "")

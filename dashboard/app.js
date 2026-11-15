@@ -5,7 +5,7 @@ const DATA = "data/";
 const STEP = 900;
 const MON = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split(" ");
 const WEEKDAYS = "Mon Tue Wed Thu Fri Sat Sun".split(" ");
-const LABEL = { energy: "Energy", price: "Price", wind: "Wind", solar: "Solar" };
+const LABEL = { energy: "Energy", price: "Price", wind: "Wind", solar: "Solar", solar_be: "Solar" };
 const cache = {};
 const json = p =>
   (cache[p] ??= fetch(DATA + p).then(r => {
@@ -415,6 +415,7 @@ async function renderBacktest(root) {
   const days = Object.fromEntries(targets.map(t => [t, allDays[t]]));
   CONFIGS = meta.configs.map(c => c.name).filter(c => targets.some(t => days[t].configs[c]));
   const type = Object.fromEntries(meta.configs.map(c => [c.name, c.type]));
+  const context = Object.fromEntries(meta.configs.map(c => [c.name, c.context]));
   const lb = leaderboard(days, meta.baseline), t0 = targets[0];
   const top = lb.filter(r => r.config !== meta.live_config && r.config !== meta.baseline).slice(0, 2).map(r => r.config);
   let sel = [meta.live_config, meta.baseline, ...top].filter(c => CONFIGS.includes(c)), types = new Set(), absolute = false;
@@ -447,8 +448,8 @@ async function renderBacktest(root) {
     const rows = lb.filter(r => !types.size || types.has(type[r.config]));
     const cols = targets.flatMap(t => [[`${t} rmse rel`, `${LABEL[t]} RMSE`, f3], [`${t} winkler rel`, `${LABEL[t]} Winkler`, f3], [`${t} coverage`, `${LABEL[t]} cov.`, pct],
       ...(absolute ? [[`${t} rmse`, `${LABEL[t]} RMSE abs`, f1], [`${t} winkler`, `${LABEL[t]} Winkler abs`, f1], [`${t} days`, "days", String]] : [])]);
-    lbEl.innerHTML = `<table><thead><tr><th>Rank</th><th>Config</th><th>Type</th><th class="n">Score</th>${cols.map(c => `<th class="n">${c[1]}</th>`).join("")}</tr></thead><tbody>${rows.map(r =>
-      `<tr class="${r.config === meta.live_config ? "live" : ""} ${r.rank <= 3 ? `m${r.rank}` : ""}"><td class="n">${r.rank <= 3 ? `<span class="medal" title="${["Gold", "Silver", "Bronze"][r.rank - 1]}">${r.rank}</span>` : r.rank ?? "–"}</td><td class="mono">${esc(r.config)}${r.config === meta.live_config ? ' <span class="pill">live</span>' : ""}</td><td class="muted">${type[r.config]}</td><td class="n ${relClass(r.score)}"><b>${f3(r.score)}</b></td>${cols.map(([k, , f]) => `<td class="n ${k.endsWith("rel") ? relClass(r[k]) : ""}">${f(r[k])}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+    lbEl.innerHTML = `<table><thead><tr><th>Rank</th><th>Config</th><th>Type</th><th class="n">Context</th><th class="n">Score</th>${cols.map(c => `<th class="n">${c[1]}</th>`).join("")}</tr></thead><tbody>${rows.map(r =>
+      `<tr class="${r.config === meta.live_config ? "live" : ""} ${r.rank <= 3 ? `m${r.rank}` : ""}"><td class="n">${r.rank <= 3 ? `<span class="medal" title="${["Gold", "Silver", "Bronze"][r.rank - 1]}">${r.rank}</span>` : r.rank ?? "–"}</td><td class="mono">${esc(r.config)}${r.config === meta.live_config ? ' <span class="pill">live</span>' : ""}</td><td class="muted">${type[r.config]}</td><td class="n muted">${context[r.config] == null ? "–" : `${context[r.config]} d`}</td><td class="n ${relClass(r.score)}"><b>${f3(r.score)}</b></td>${cols.map(([k, , f]) => `<td class="n ${k.endsWith("rel") ? relClass(r[k]) : ""}">${f(r[k])}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
   }
   drawLb();
   root.querySelector("#bt-types").addEventListener("click", e => {
@@ -728,7 +729,9 @@ const MARKETS = [
   { id: "es-mfrr", name: "Spain mFRR", note: "energy & price", program: "EDP", gate: "17:00 CET, D-1", resources: ["spain_mfrr_energy", "spain_mfrr_price"], truth: "ESIOS (REE)", live: true, catalog: true,
     city: "Madrid", gateLocal: "17:00 Madrid on D-1", source: "ESIOS", missingTruth: "Quarter-hours without truth (no mFRR activation, so no price) are left out.",
     about: (from, to) => `The truth series from <span class="mono">v1/target.parquet</span>: mFRR activated <b>energy</b> (net, MWh per quarter-hour, upward positive) and mFRR <b>price</b> (EUR/MWh), Spain, 15-min, ${from} – ${to}. Missing energy is filled with 0 (no activation); missing price stays empty. No data during the Iberian blackout (28 Apr – 6 May 2025). Prices rise from Jul 2026 (monthly mean ~100 → ~157 EUR/MWh).` },
-  { id: "be-solar", name: "Belgium solar", program: "Elia", gate: "10:00 CET, D-1 (plus hourly intraday)", resources: ["belgium_solar_opendata_elia"], truth: "Elia Open Data (ods032)" },
+  { id: "be-solar", name: "Belgium solar", program: "Elia", gate: "10:00 CET, D-1 (plus hourly intraday)", resources: ["belgium_solar_opendata_elia"], truth: "Elia Open Data, Belgium total", live: true,
+    city: "Brussels", gateLocal: "10:00 Brussels on D-1", source: "Elia", missingTruth: "",
+    about: (from, to) => `The truth series from <span class="mono">target_elia.parquet</span>: Elia's measured PV generation, Belgium total (TSO + DSO connected), MW (mean per quarter-hour), 15-min, ${from} – ${to}. Elia dataset ods032 up to 25 Oct 2026, then ods209 (and ods210 for the latest hours), as Predico scores it.` },
   { id: "de-solar", name: "Germany solar", note: "50Hertz", resources: ["germany_solar_50hertz_ca"], truth: "ENTSO-E A75 B16, 50Hertz control area", about: de50Hertz("solar (A75 B16)"), ...DE },
   { id: "de-wind", name: "Germany wind", note: "50Hertz", resources: ["germany_wind_50hertz_ca"], truth: "ENTSO-E A75 B18 + B19, 50Hertz control area", about: de50Hertz("wind offshore + onshore (A75 B18 + B19)"), ...DE },
 ];

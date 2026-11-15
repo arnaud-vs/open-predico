@@ -175,8 +175,10 @@ its feature groups in `groups.toml`. Remaining Spain-specific code: `to_grid` (E
 
 ### Elia solar (`belgium_solar_opendata_elia`)
 
-- **Truth:** Predico's: Elia ods032 `measured`, region Belgium (`data/elia.py`). ods032 ends
-  2026-10-25 (test period ends there); live needs ods209/ods210 (DATA_SOURCES.md).
+- **Truth:** Predico's (its raw-measurements endpoint matched exactly, 2026-11-15): Elia ods032
+  `measured` (region Belgium) up to 2026-10-25, then ods209 `measured_upscaled` with
+  gridconnectiontype Total (TSO + DSO; DSO alone is ~4% lower), ods210 for the latest hours
+  (`elia:solar.*`, `data/elia.py`).
 - **Origin:** 09:00 Brussels for the 10:00 D+1 gate (hourly intraday sessions not covered).
 - **Capacity:** Elia monitored capacity 12.1 GW (2026-10-25), clip at 12.2 GW; max seen 8.6 GW.
 - **Features:** `target_elia` (past), `weather_be` (Open-Meteo ECMWF IFS 00 UTC run of D-1, out
@@ -190,7 +192,10 @@ its feature groups in `groups.toml`. Remaining Spain-specific code: `to_grid` (E
   both runs 1.11 / 1.03 (`t0gamma_cov_ctx90`), ECMWF 00 UTC 1.21 / 1.07, ICON-D2 alone 1.29 /
   1.24 (`t0gamma_cov_noecmwf_ctx90`); climatology 2.65 / 2.07. Elia issues at 11:00 D-1, after
   the gate. Coverage ~88% (Elia 85%): our bands are a bit wide.
-- **Live:** not yet (`live = false` in targets.toml keeps it out of submit, check and publish).
+- **Live (production) since 2026-11-16:** `t0gamma_cov_ctx90` D+1 with both weather runs, climatology
+  D+2..D+10. `submit` at 09:15, `check` at 09:30/09:45 (the shared crons gained the 09 hour);
+  the run takes ~6.5 min (Open-Meteo: 22 points x 92 days). Intraday sessions are covered by
+  the same continuous forecast. `live = false` in targets.toml keeps a target out of live/.
 
 ## Predico rules that shape the repo
 

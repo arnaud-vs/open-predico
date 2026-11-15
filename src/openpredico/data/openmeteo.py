@@ -68,9 +68,10 @@ VARIABLES = [
 ]
 PRECEDING_HOUR = {"shortwave_radiation", "direct_radiation", "diffuse_radiation"}  # hour means
 STEP = pd.Timedelta("15min")
-# A request costs one call per point (7, or 11 for "be"). Free tier: 5000 calls/h. The live run
-# (~92 days) can use 1 s; a backfill of hundreds of days sets PAUSE = 6 (~4200 calls/h; "be": 9).
-PAUSE = 1
+# A request costs one call per point (7, or 11 for Belgium). Free tier: 600 calls/min, 5000/h.
+# Seconds to wait per point after each request: live (~92 days) 0.15 (~400 calls/min); a backfill
+# of hundreds of days sets PAUSE = 0.8 (~4400 calls/h).
+PAUSE = 0.15
 _session = requests.Session()
 _session.mount(
     "https://",
@@ -93,7 +94,7 @@ def fetch(start: pd.Timestamp, end: pd.Timestamp, areas=None) -> dict[str, pd.Da
     for day in days:
         for area, hourly in _run(day, areas).items():
             parts[area].append(hourly)
-        time.sleep(PAUSE)
+        time.sleep(PAUSE * sum(len(POINTS[a]) for a in areas))
     out = {}
     for area, frames in parts.items():
         hourly = pd.concat(frames)
