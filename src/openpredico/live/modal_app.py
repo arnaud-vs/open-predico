@@ -56,7 +56,8 @@ def check() -> None:
 
 
 @app.function(
-    schedule=modal.Cron("30 15,17 * * *", timezone=TZ), cpu=1.0, memory=2048, timeout=1800
+    # 15:30 and 17:30 follow the gates; 09:30 and 21:30 pick up Predico scores that land later
+    schedule=modal.Cron("30 9,15,17,21 * * *", timezone=TZ), cpu=1.0, memory=2048, timeout=1800
 )
 def publish() -> None:
     """Half an hour after each gate: publish what Predico scored, then rebuild the dashboard."""

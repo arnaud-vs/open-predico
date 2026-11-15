@@ -1,0 +1,29 @@
+name: dashboard
+
+# Rebuilds the public dashboard (HF Space) from the HF datasets every hour at :21, off the busy
+# minutes. Best effort: Modal's publish job also rebuilds it after each gate. Reads only public
+# data and writes the Space, so it needs HF_TOKEN (environment `production`), no Predico access.
+on:
+  schedule:
+    - cron: "21 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dashboard
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync
+      - run: uv run python dashboard/build.py --upload
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
