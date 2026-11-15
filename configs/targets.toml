@@ -66,6 +66,8 @@ groups = [
 unit = "MW"
 kind = "generation"
 capacity = 24500  # ponytail: ENTSO-E A68 installed capacity for 2026 (1828 + 22629 MW)
+# ENTSO-E A69 day-ahead forecast (point only: q10 = q90 = q50), scored as config entsoe_a69
+tso = { q50 = "wind_offshore_forecast_50hertz+wind_onshore_forecast_50hertz" }
 timezone = "Europe/Berlin"
 origin = "14:00"
 gate = "15:00"
@@ -85,6 +87,8 @@ groups = [
 unit = "MW"
 kind = "generation"
 capacity = 25300  # ponytail: ENTSO-E A68 installed capacity for 2026 (25235 MW)
+# ENTSO-E A69 day-ahead forecast (point only: q10 = q90 = q50), scored as config entsoe_a69
+tso = { q50 = "solar_forecast_50hertz" }
 timezone = "Europe/Berlin"
 origin = "14:00"
 gate = "15:00"
@@ -102,4 +106,5 @@ timezone = "Europe/Brussels"
 origin = "09:00"  # D+1 gate 10:00 Brussels (Predico's Elia program)
 gate = "10:00"
 test_period = ["2025-11-01", "2026-10-25"]  # weather benchmark v4 ends 2026-10-25
-tso = "tso_forecast_be"  # group with Elia's q10/q50/q90, scored as config elia_dayahead11h
+# Elia's forecast (Predico's owner benchmark), scored as config elia_dayahead11h
+tso = { q10 = "tso_q10_be", q50 = "tso_q50_be", q90 = "tso_q90_be" }

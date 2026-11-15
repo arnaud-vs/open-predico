@@ -121,6 +121,9 @@ holiday_de = { source = "calendar:holiday_de", availability = "future" }
 [target_elia]  # Elia's measured PV, Belgium total (TSO + DSO), MW: Predico's truth
 solar_be = { source = "elia:solar.measured", availability = "past" }
 
+[capacity_be]  # Elia's monitored PV capacity, Belgium total, MW: published ahead (forecast rows)
+capacity_be = { source = "elia:solar.monitoredcapacity", availability = "future" }
+
 [weather_be]  # Open-Meteo ECMWF IFS, 00 UTC run of D-1, capacity-weighted over 11 provinces
 ghi_be = { source = "openmeteo:be.shortwave_radiation", availability = "future" }  # W/m2
 direct_radiation_be = { source = "openmeteo:be.direct_radiation", availability = "future" }

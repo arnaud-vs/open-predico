@@ -47,9 +47,13 @@ TYPES = {  # config name prefix -> model type; anything else is ML
     "ciproto": "foundation model",
     "timeh2o": "foundation model",
     "elia": "TSO forecast",
+    "entsoe": "TSO forecast",
 }
 STEP = pd.Timedelta("15min")
-LIVE_COLUMNS = ("q10", "q50", "q90", "s10", "s50", "s90", "obs", "b10", "b50", "b90")
+LIVE_COLUMNS = (
+    *("q10", "q50", "q90", "s10", "s50", "s90", "obs", "b10", "b50", "b90"),
+    *("t10", "t50", "t90"),  # the TSO's own forecast, where the target has one
+)
 
 
 def arr(values) -> list:

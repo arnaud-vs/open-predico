@@ -7,7 +7,7 @@ truth as `obs`) go to `<out>/<config>/<target>.parquet`, ready for `evaluation.r
 `drop` leaves out comma-separated columns (ablation); `drop=all` keeps only the target history
 (univariate: no past, known-future or calendar covariates). `targets` limits the run to
 comma-separated targets. Repo `slot_climatology` runs that baseline over `context days`; repo
-`tso` scores the TSO's published forecast (targets.toml `tso` group) instead of a model.
+`tso` scores the TSO's published forecast (targets.toml `tso` columns) instead of a model.
 
     python -m openpredico.evaluation.experiment <config> <repo> <context days> <out dir> \
         [<device>] [<drop>] [<origin HH:MM, local; default from targets.toml>] [<targets>]
@@ -85,6 +85,15 @@ def features(
     return df[[y, *past, *future]].astype(float), future
 
 
+def tso_forecast(t: dict, frames: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """The TSO's forecast of target `t` as q10/q50/q90, from the columns its `tso` table names
+    (`a+b` sums columns; a point forecast without q10/q90 repeats q50 there)."""
+    cols = {c for v in t["tso"].values() for c in v.split("+")}
+    df = pd.concat([f[[c for c in f if c in cols]] for f in frames.values()], axis=1)
+    q = {k: df[v.split("+")].sum(axis=1, min_count=len(v.split("+"))) for k, v in t["tso"].items()}
+    return pd.DataFrame({k: q.get(k, q["q50"]) for k in ("q10", "q50", "q90")})
+
+
 def run(
     config: str,
     repo: str,
@@ -110,8 +119,8 @@ def run(
         if repo == "tso":  # the TSO's own forecast as published (targets.toml `tso`), not a model
             if "tso" not in t:
                 continue
-            preds = frames[t["tso"]].set_axis(["q10", "q50", "q90"], axis=1)
-            preds = clip(preds[preds.index.tz_convert(t["timezone"]).normalize().isin(days)], t)
+            preds = clip(tso_forecast(t, frames), t)
+            preds = preds[preds.index.tz_convert(t["timezone"]).normalize().isin(days)]
             preds["obs"] = history[t["column"]]
             preds.index.name = "time"
             (out / config).mkdir(parents=True, exist_ok=True)

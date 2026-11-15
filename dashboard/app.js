@@ -265,6 +265,7 @@ async function renderLive(root) {
           <button data-s="4" aria-pressed="true"><span class="sw dot" style="border-color:var(--cont)"></span>Model forecast</button>
           <button data-s="1,2" aria-pressed="true"><span class="sw box"></span>Interval (q10–q90)</button>
           <button data-s="5" aria-pressed="false"><span class="sw dash" style="border-color:var(--base)"></span>Climatology baseline</button>
+          ${hasTso ? `<button data-s="7" aria-pressed="true" title="The TSO's own day-ahead forecast, published after the gate"><span class="sw dash" style="border-color:var(--tso)"></span>${m.source} forecast (TSO)</button>` : ""}
         </div><span class="hint">drag to zoom · double-click to reset · scores follow the view</span></div>
       </div>
       <div class="card"><div class="card-head"><div><h2>Scores against climatology</h2><p class="sub" id="lv-span"></p></div></div>
@@ -286,7 +287,8 @@ async function renderLive(root) {
       <div class="card"><div class="card-head"><div><h2>Daily scores</h2><p class="sub">Every target day, newest first. Click a row to show it in the chart.</p></div></div>
         <div class="tablewrap" style="max-height:520px" id="lv-daily"></div></div>`;
 
-    const data = [x, e10, e90, s50, T.q50, T.b50, T.obs];
+    const t50 = T.t50 ?? nul(), hasTso = t50.some(v => v != null);
+    const data = [x, e10, e90, s50, T.q50, T.b50, T.obs, t50];
     const span = x[n - 1] - x[0];
     let range = "7";
     const setRange = r => {
@@ -294,7 +296,7 @@ async function renderLive(root) {
       const max = x[n - 1] + STEP, min = r === "all" ? x[0] : Math.max(x[0], max - +r * 86400);
       main.inst.setScale("x", { min, max });
     };
-    const shown = [true, true, true, true, true, false, true];
+    const shown = [true, true, true, true, true, false, true, hasTso];
     const main = mount(root.querySelector("#lv-chart"), (w, h) => new uPlot({
       width: w, height: h, tzDate: tzUTC, legend: { show: false },
       scales: { x: { time: true } },
@@ -306,6 +308,7 @@ async function renderLive(root) {
         line("Model", css("--cont"), { width: 2, dash: [2, 4], cap: "round" }),
         line("Climatology", css("--base"), { width: 1.5, dash: [6, 4] }),
         line("Observed", css("--obs"), { width: 2 }),
+        line("TSO forecast", css("--tso"), { width: 1.5, dash: [8, 3, 2, 3] }),
       ].map((s, i) => (i ? { ...s, show: shown[i] } : s)),
       bands: [{ series: [2, 1], fill: css("--band") }],
       axes: axes(`${LABEL[target]} (${unit})`),
@@ -317,6 +320,7 @@ async function renderLive(root) {
         if (on(4) && T.q50[i] != null) rows.push([css("--cont"), "Model", `${f1(T.q50[i])} ${unit}`, true]);
         if (on(1) && e10[i] != null) rows.push([css("--accent"), "q10–q90", `${f1(e10[i])} … ${f1(e90[i])}`]);
         if (on(5) && T.b50[i] != null) rows.push([css("--base"), "Climatology", `${f1(T.b50[i])} ${unit}`]);
+        if (on(7) && t50[i] != null) rows.push([css("--tso"), `${m.source} forecast`, `${f1(t50[i])} ${unit}`]);
         return rows.length ? ttHTML(fmtUTC(x[i]) + (dayInfo.get(madrid(x[i]).day)?.pg ? " · playground" : ""), rows) : null;
       })],
     }, data, root.querySelector("#lv-chart")), chartHeight);

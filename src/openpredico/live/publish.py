@@ -8,7 +8,8 @@ dashboard shows them as missed). Rebuilt from `live-private` on every run, so it
                                 at the gate; s10/s50/s90: what Predico registered as our session
                                 submissions, production or else playground (also days from
                                 before the HF record); obs; b10/b50/b90
-                                (slot climatology from the same run's inputs, the baseline)
+                                (slot climatology from the same run's inputs, the baseline);
+                                t10/t50/t90: the TSO's own forecast (targets.toml `tso`)
     scores/<target>.parquet     Predico's official scores of our submissions per day, variable
                                 and metric, with our rank and the number of participants
     runs.parquet                one row per run and target: model and input features
@@ -23,9 +24,9 @@ from huggingface_hub import HfApi
 
 from openpredico.config import live_targets
 from openpredico.data import hf
-from openpredico.data.groups import fetch_source
+from openpredico.data.groups import build, fetch_source, load_groups
 from openpredico.evaluation.backtest import PUBLICATION_LAG
-from openpredico.evaluation.experiment import TARGET_COLUMNS
+from openpredico.evaluation.experiment import TARGET_COLUMNS, tso_forecast
 from openpredico.live.predico import Predico
 from openpredico.live.submit import CONFIG
 from openpredico.models.baselines import slot_climatology
@@ -91,6 +92,20 @@ def main() -> None:
         if t["unit"] == "MWh":
             obs[known] = obs[known].fillna(0)  # missing quarter-hour = no activation (PLAN.md)
         out["obs"] = obs
+        if "tso" in t:  # the TSO's own forecast (published after the gate): t10/t50/t90
+            cols = {c for v in t["tso"].values() for c in v.split("+")}
+            # through the last gated day, which can still be ahead of now
+            stop = (out.index.max() + pd.Timedelta("15min")).tz_localize(None).isoformat()
+            frames = {
+                g: build(g, start, stop, t["timezone"], lenient=True)
+                for g, columns in load_groups().items()
+                if cols & columns.keys()
+            }
+            try:
+                tso = tso_forecast(t, frames).reindex(out.index)
+                out[["t10", "t50", "t90"]] = tso.to_numpy()
+            except KeyError:  # a TSO column failed to build: publish without it
+                print(f"{name}: TSO forecast left out")
         hf.upload(out, "live", f"forecasts/{name}.parquet", f"Publish {name} {now:%Y-%m-%d}")
         # Our own official scores and rank only; never other forecasters' results.
         hf.upload(client.scores(challenges), "live", f"scores/{name}.parquet", f"Scores {name}")
