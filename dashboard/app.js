@@ -688,11 +688,12 @@ async function renderTarget(root) {
 
 // --- Input features ----------------------------------------------------------------------
 async function renderInputs(root) {
-  const cat = await json("catalog.json");
+  const cat = await json("catalog.json"), used = await liveFeatures(mk());
   const groups = new Set(cat.flatMap(r => (r.group ? r.group.split(", ") : [])));
   const cats = [...new Set(cat.map(r => r.category))].map(c => ({ c, n: cat.filter(r => r.category === c).length, used: cat.filter(r => r.category === c && r.used).length })).sort((a, b) => b.used - a.used || b.n - a.n);
   root.innerHTML = `
     <div class="head"><div><h1>Input features</h1><p class="lede">Every series we could feed a model. ESIOS serves <b>indicators</b> (time series), <b>offer indicators</b> (bid curves) and <b>archives</b> (bulk files). Calendar columns are computed. <b>Used</b> marks series in a feature group of <span class="mono">configs/groups.toml</span>; availability <b>future</b> = known for the target day before the gate, <b>past</b> = only known up to the forecast origin. Categories come from keyword rules on the English name, so a few rows may sit in the wrong bucket.</p></div></div>
+    ${used.size ? `<div class="card"><div class="card-head"><div><h2>Used by the live model</h2><p class="sub">The ${used.size} input columns of the latest live run (besides the target's own history).</p></div></div><div class="chips">${[...used].sort().map(f => `<span class="chip static mono">${esc(f)}</span>`).join("")}</div></div>` : ""}
     <div class="kpis">${kpi("Series", cat.length.toLocaleString("en-GB"))}${kpi("Used", String(cat.filter(r => r.used).length))}${kpi("Feature groups", String(groups.size))}</div>
     <div class="card"><div class="card-head"><div><h2>Catalog</h2><p class="sub" id="in-n"></p></div>
       <div class="controls"><select id="in-c" aria-label="Category"><option value="">All categories</option>${cats.map(c => `<option value="${esc(c.c)}">${esc(c.c)} (${c.used}/${c.n})</option>`).join("")}</select>
@@ -715,14 +716,45 @@ async function renderInputs(root) {
   draw();
 }
 
-// Outside Spain: the market's feature columns from configs/groups.toml (build.py writes them).
+// Feature columns the latest live run of each of the market's targets used (live.json).
+async function liveFeatures(m) {
+  const [live, meta] = await Promise.all([json("live.json").catch(() => null), json("meta.json")]), out = new Set();
+  for (const t of shortsOf(m, meta)) for (const f of live?.targets?.[t]?.features ?? []) out.add(f);
+  return out;
+}
+
+// Outside Spain: the market's feature columns from configs/groups.toml (build.py writes them),
+// and a map of the weather points with their weights where the market reads Open-Meteo.
 async function renderFeatures(root) {
-  const m = mk(), rows = (await json("features.json"))[m.id];
+  const m = mk(), rows = (await json("features.json"))[m.id], used = await liveFeatures(m);
+  const geo = (await json("geo.json").catch(() => ({})))[m.id];
   root.innerHTML = `
-    <div class="head"><div><h1>Input features</h1><p class="lede">The columns the ${esc(m.name)} models see, one line each in <span class="mono">configs/groups.toml</span>. Availability <b>future</b> = known for the target day before the gate, <b>past</b> = only known up to the forecast origin.</p></div></div>
-    <div class="card"><div class="card-head"><div><h2>Feature columns</h2><p class="sub">${rows.length} columns</p></div></div>
-      <div class="tablewrap"><table><thead><tr><th>Group</th><th>Column</th><th>Source</th><th>Availability</th><th>Description</th></tr></thead><tbody>${rows.map(r =>
-        `<tr><td class="mono">${esc(r.group)}</td><td class="mono">${esc(r.column)}</td><td class="mono">${esc(r.source)}</td><td>${esc(r.availability)}</td><td class="desc">${esc(r.description)}</td></tr>`).join("")}</tbody></table></div></div>`;
+    <div class="head"><div><h1>Input features</h1><p class="lede">The columns the ${esc(m.name)} models see, one line each in <span class="mono">configs/groups.toml</span>. Availability <b>future</b> = known for the target day before the gate, <b>past</b> = only known up to the forecast origin. <b>Live</b> marks the columns the latest live run used.</p></div></div>
+    ${geo ? `<div class="card"><div class="card-head"><div><h2>Weather sampling</h2><p class="sub">${geo.sets.map(s => `${s.points.length} points (${s.weighted ? "weighted by PV capacity; dot size = weight" : "plain mean"}): ${s.runs.join(" and ")} run of D-1`).join(" · ")}. Outline: ${esc(geo.label)}.</p></div></div>
+      <div class="map" id="ft-map" role="img" aria-label="Map of the weather points"></div>
+      <p class="sub">Boundaries: ${esc(geo.credit)}. Map: © OpenStreetMap contributors.</p></div>` : ""}
+    <div class="card"><div class="card-head"><div><h2>Feature columns</h2><p class="sub">${rows.length} columns · ${rows.filter(r => used.has(r.column)).length} in the latest live run</p></div></div>
+      <div class="tablewrap"><table><thead><tr><th>Live</th><th>Group</th><th>Column</th><th>Source</th><th>Availability</th><th>Description</th></tr></thead><tbody>${rows.map(r =>
+        `<tr><td>${used.has(r.column) ? '<span class="pill">live</span>' : ""}</td><td class="mono">${esc(r.group)}</td><td class="mono">${esc(r.column)}</td><td class="mono">${esc(r.source)}</td><td>${esc(r.availability)}</td><td class="desc">${esc(r.description)}</td></tr>`).join("")}</tbody></table></div></div>`;
+  if (geo && window.L) drawMap(root.querySelector("#ft-map"), geo);
+}
+
+function drawMap(el, geo) {
+  const map = L.map(el, { scrollWheelZoom: false });
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 12, attribution: "© OpenStreetMap" }).addTo(map);
+  const regions = L.geoJSON(geo.regions, {
+    style: { color: css("--accent-ink"), weight: 1.5, fillColor: css("--accent"), fillOpacity: 0.12 },
+    onEachFeature: (f, layer) => layer.bindTooltip(esc(f.properties.name)),
+  }).addTo(map);
+  const bounds = regions.getBounds();
+  for (const s of geo.sets) for (const [lat, lon, w] of s.points) {
+    const r = s.weighted ? 5 + Math.sqrt(w) * 30 : 7;
+    L.circleMarker([lat, lon], { radius: r, color: css("--surface"), weight: 2, fillColor: css("--tso"), fillOpacity: 0.9 })
+      .bindTooltip(`${lat.toFixed(2)}, ${lon.toFixed(2)}${s.weighted ? ` · weight ${(w * 100).toFixed(1)}%` : ""}<br>${s.runs.join(", ")}`)
+      .addTo(map);
+    bounds.extend([lat, lon]);
+  }
+  map.fitBounds(bounds.pad(0.05));
 }
 
 // --- Targets (Predico resources) --------------------------------------------------------

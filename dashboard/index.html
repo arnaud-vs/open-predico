@@ -6,6 +6,7 @@
 <title>open-predico</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 /* Layout: a slim top bar with tabs, then one centred column of cards per tab. Gridual palette. */
@@ -126,6 +127,8 @@ td.desc { min-width: 280px; color: var(--ink-soft); }
 .day.cont { background: var(--surface); border: 2px dotted var(--cont); color: var(--ink); }
 .day.miss { background: repeating-linear-gradient(45deg, var(--grid) 0 3px, var(--surface) 3px 6px); }
 .day.pg { opacity: 0.55; }
+.map { height: 440px; border-radius: 8px; border: 1px solid var(--line); }
+.leaflet-container { font: 12px var(--sans); background: var(--grid); }
 tr.pg td { color: var(--ink-soft); }
 .heat { display: grid; grid-template-columns: 64px repeat(31, minmax(10px, 1fr)); gap: 2px; font: 10px var(--mono); color: var(--ink-soft); min-width: 520px; }
 .heat div { aspect-ratio: 1; border-radius: 2px; }
@@ -184,6 +187,7 @@ canvas.scatter { width: 100%; height: 360px; display: block; }
   <section data-tab="inputs" id="tab-inputs" hidden><p class="empty">Loading…</p></section>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.30/dist/uPlot.iife.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

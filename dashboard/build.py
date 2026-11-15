@@ -13,9 +13,11 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import requests
 from huggingface_hub import HfApi
 
 from openpredico.config import load_targets
+from openpredico.data import openmeteo
 from openpredico.data.catalog import CALENDAR
 from openpredico.data.groups import load_groups
 from openpredico.data.hf import ORG, download
@@ -175,6 +177,85 @@ def catalog(out: Path) -> None:
     write(out, "features.json", features)
 
 
+# Region outlines for the weather-points map (geoBoundaries, pinned release), per market.
+GB = "https://github.com/wmgeolab/geoBoundaries/raw/9469f09/releaseData/gbOpen"
+REGIONS = {
+    "de": {
+        "url": f"{GB}/DEU/ADM1/geoBoundaries-DEU-ADM1_simplified.geojson",
+        "keep": {"Berlin", "Brandenburg", "Hamburg", "Mecklenburg-Vorpommern", "Sachsen"}
+        | {"Sachsen-Anhalt", "Thüringen"},  # the 50Hertz control area
+        "label": "50Hertz control area (states)",
+        "credit": "geoBoundaries (BKG, dl-de/by-2-0)",
+    },
+    "be": {
+        "url": f"{GB}/BEL/ADM2/geoBoundaries-BEL-ADM2_simplified.geojson",
+        "keep": None,  # every province
+        "label": "Belgian provinces",
+        "credit": "geoBoundaries (ODbL 1.0)",
+    },
+}
+RUNS = {"ecmwf_ifs": "ECMWF IFS"} | {
+    "icon_d2": "ICON-D2",
+    "knmi_harmonie_arome_netherlands": "KNMI HARMONIE-AROME",
+    "ecmwf_aifs025_single": "ECMWF AIFS",
+}
+
+
+def _round(coords):
+    return (
+        [_round(c) for c in coords]
+        if isinstance(coords[0], list)
+        else [round(x, 3) for x in coords]
+    )
+
+
+def geo(out: Path) -> None:
+    """Per market with Open-Meteo inputs: region outlines and the weather points (weight share)."""
+    groups, targets, data = load_groups(), load_targets(), {}
+    for market, shorts in MARKETS.items():
+        areas = {
+            c["source"].split(":")[1].split(".")[0]
+            for t in shorts
+            for g in targets[t]["groups"]
+            for c in groups[g].values()
+            if c["source"].startswith("openmeteo:")
+        }
+        if not areas:
+            continue
+        region = REGIONS["be" if market.startswith("be") else "de"]
+        fc = requests.get(region["url"], timeout=120).json()
+        features = [
+            {
+                "type": "Feature",
+                "properties": {"name": f["properties"]["shapeName"]},
+                "geometry": f["geometry"] | {"coordinates": _round(f["geometry"]["coordinates"])},
+            }
+            for f in fc["features"]
+            if region["keep"] is None or f["properties"]["shapeName"] in region["keep"]
+        ]
+        sets = {}  # same points -> one set, listing every run read on them
+        for a in sorted(areas):
+            points, w = openmeteo.POINTS[a], openmeteo.WEIGHTS.get(a)
+            w = w or [1] * len(points)
+            shift = openmeteo.RUN_SHIFT.get(a, pd.Timedelta(0))
+            hour = (pd.Timedelta(days=1) - shift).seconds // 3600 % 24
+            run = f"{RUNS[openmeteo.AREA_MODEL.get(a, openmeteo.MODEL)]} {hour:02d} UTC"
+            shares = [[p[0], p[1], round(x / sum(w), 4)] for p, x in zip(points, w, strict=True)]
+            entry = sets.setdefault(
+                tuple(points),
+                {"areas": [], "runs": [], "weighted": a in openmeteo.WEIGHTS, "points": shares},
+            )
+            entry["areas"].append(a)
+            entry["runs"].append(run)
+        data[market] = {
+            "regions": {"type": "FeatureCollection", "features": features},
+            "label": region["label"],
+            "credit": region["credit"],
+            "sets": list(sets.values()),
+        }
+    write(out, "geo.json", data)
+
+
 def live_frames(demo: bool) -> tuple[dict[str, pd.DataFrame], pd.DataFrame | None]:
     """Published live forecasts per short target name, and the runs table (None if absent)."""
     if not demo:
@@ -279,6 +360,7 @@ def main() -> None:
     meta = backtest(a.out)
     target_series(a.out)
     catalog(a.out)
+    geo(a.out)
     live(a.out, a.demo_live)
     meta |= {
         "generated": pd.Timestamp.now(tz="UTC").isoformat(timespec="minutes"),
