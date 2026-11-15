@@ -12,7 +12,16 @@
 predico_resource = "spain_mfrr_energy"
 truth = "esios:10250"
 column = "mfrr_energy"
-groups = ["target", "mfrr", "da_market", "ree_forecasts", "balancing", "xborder", "calendar"]
+groups = [
+    "target",
+    "mfrr",
+    "da_market",
+    "ree_forecasts",
+    "balancing",
+    "xborder",
+    "calendar",
+    "calendar_es",
+]
 unit = "MWh"
 kind = "market"
 timezone = "Europe/Madrid"
@@ -24,7 +33,16 @@ test_period = ["2025-11-01", "2026-10-31"]
 predico_resource = "spain_mfrr_price"
 truth = "esios:2197"
 column = "mfrr_price"
-groups = ["target", "mfrr", "da_market", "ree_forecasts", "balancing", "xborder", "calendar"]
+groups = [
+    "target",
+    "mfrr",
+    "da_market",
+    "ree_forecasts",
+    "balancing",
+    "xborder",
+    "calendar",
+    "calendar_es",
+]
 unit = "EUR/MWh"
 kind = "market"
 timezone = "Europe/Madrid"
@@ -38,7 +56,6 @@ predico_resource = "germany_wind_50hertz_ca"
 # carried forward before summing (data/entsoe.py)
 truth = "entsoe:A75_B18+B19"
 column = "wind_50hertz"
-# holiday_es comes along with the shared calendar group (v1 layout); ablate with `drop`
 groups = [
     "target_50hertz",
     "entsoe_forecasts_50hertz",

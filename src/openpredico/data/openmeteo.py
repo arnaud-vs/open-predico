@@ -44,19 +44,31 @@ POINTS = {  # area -> [(lat, lon)]
         (49.95, 5.50),  # Luxembourg
     ],
 }
-POINTS["be_d2"] = POINTS["be"]  # same points, ICON-D2 (AREA_MODEL)
+POINTS["be_d2"] = POINTS["be_knmi"] = POINTS["be_aifs"] = POINTS["be"]  # other models (AREA_MODEL)
 # Weighted means (else plain): Elia's monitored PV capacity per province, MW, on 2026-10-25.
 # ponytail: fixed weights; capacity grows a few % a year, mostly in Flanders.
 WEIGHTS = {"be": [2029, 1565, 2040, 1912, 1168, 331, 358, 1058, 445, 854, 368]}
-WEIGHTS["be_d2"] = WEIGHTS["be"]
+WEIGHTS["be_d2"] = WEIGHTS["be_knmi"] = WEIGHTS["be_aifs"] = WEIGHTS["be"]
 # Areas fetched in their own request, with their run's shift back from 00 UTC of D-1. ECMWF runs
 # land ~6h40 after init (06 UTC run: 12:40 UTC on 2026-11-14), so the 00 UTC run is out ~06:40
 # UTC, before Belgium's 09:00 origin (07:00 UTC in summer); the 06 UTC run never is.
 # Backtest 2026-11-13 used the 18 UTC run of D-2 (shift 6 h) for Belgium (benchmark v3).
 # ICON-D2 (DWD, 2 km, 48 h, every 3 h; 03 UTC runs archived since 2026-04-02) lands ~1h55
 # after init (15 UTC run: 16:54 UTC on 2026-11-14): the 03 UTC run of D-1 is out ~05:00 UTC.
-RUN_SHIFT = {"be": pd.Timedelta(0), "be_d2": pd.Timedelta(hours=-3)}
-AREA_MODEL = {"be_d2": "icon_d2"}  # else MODEL
+# KNMI HARMONIE-AROME (2 km, Benelux, 60 h; hourly runs, archived every 3 h since ~2026-04-05)
+# lands ~2h36 after init: 03 UTC run of D-1 (~05:40 UTC). ECMWF AIFS (AI model, 0.25 deg;
+# archived since 2026-04-02) lands ~5h38 after init: 00 UTC run of D-1 (~05:40 UTC).
+RUN_SHIFT = {
+    "be": pd.Timedelta(0),
+    "be_d2": pd.Timedelta(hours=-3),
+    "be_knmi": pd.Timedelta(hours=-3),
+    "be_aifs": pd.Timedelta(0),
+}
+AREA_MODEL = {  # else MODEL
+    "be_d2": "icon_d2",
+    "be_knmi": "knmi_harmonie_arome_netherlands",
+    "be_aifs": "ecmwf_aifs025_single",
+}
 VARIABLES = [
     "wind_speed_100m",
     "wind_speed_10m",

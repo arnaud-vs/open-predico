@@ -42,7 +42,7 @@ Each target is an entry in `configs/targets.toml`: Predico resource name, truth 
 - The same `build()` produces benchmark history and live inputs, so there is no train/serve skew.
 - Groups hold cleaned, near-raw signals. Feature engineering lives in `data/transforms.py` and is selected per experiment.
 - **No duplicates:** CI fails if two groups share a source id or a column name.
-- **v1 groups (ESIOS):** target history, day-ahead market (OMIE price), REE D+1 forecasts (demand, wind, solar), balancing (aFRR, imbalance; RR dropped: Spain left TERRE end of 2025, no data after 2025-12-30), REE cross-border exchanges (future: PBF net schedule FR/PT/total 10104/10113/10186 and NTC D-1 forecasts 1844/1848/1845/1849; past: P48 net 10015/10014; skip Morocco, Andorra and revised NTC 488), calendar (computed: quarter-hour, weekday, Spanish national holidays, DST-switch days; no regional holidays in v1). Weather and other countries' TSO data later.
+- **v1 groups (ESIOS):** target history, day-ahead market (OMIE price), REE D+1 forecasts (demand, wind, solar), balancing (aFRR, imbalance; RR dropped: Spain left TERRE end of 2025, no data after 2025-12-30), REE cross-border exchanges (future: PBF net schedule FR/PT/total 10104/10113/10186 and NTC D-1 forecasts 1844/1848/1845/1849; past: P48 net 10015/10014; skip Morocco, Andorra and revised NTC 488), calendar (computed: quarter-hour, weekday, DST-switch days) and calendar_es (Spanish national holidays; part of `calendar` until 2026-11-15, so backtests before then gave every target holiday_es). Weather and other countries' TSO data later.
 - **Time:** UTC everywhere; local time only inside calendar features.
 
 ## Experiment configs
@@ -159,8 +159,7 @@ its feature groups in `groups.toml`. Remaining Spain-specific code: `to_grid` (E
 - **Features:** `target_50hertz` (both targets and the wind components, past; A75 shows up
   ~25-40 min after real time), `entsoe_forecasts_50hertz` (A65 day-ahead load: future, due
   10:00 D-1; A69 day-ahead wind/solar: past, due 18:00 D-1, after the gate), `weather_50hertz`
-  (Open-Meteo ECMWF IFS, 00 UTC run of D-1, area means: future), `calendar` (shared, built in
-  Europe/Berlin; `holiday_es` comes along) and `calendar_de` (`holiday_de`). `da_market` was
+  (Open-Meteo ECMWF IFS, 00 UTC run of D-1, area means: future), `calendar` (shared) and `calendar_de` (`holiday_de`); `holiday_es` came along with `calendar` until 2026-11-15. `da_market` was
   dropped (2026-11-09): it is Spain's group (ES/PT/FR prices, REE forecasts) and the DE price
   only lands on ESIOS ~14:05. See DATA_SOURCES.md for the availability evidence.
 - **Backtest (2026-11-08, test year, ratio to `slot_climatology_28d`):** `t0gamma_cov_ctx90`
