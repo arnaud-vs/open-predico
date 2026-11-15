@@ -104,11 +104,20 @@ def fetch(start: pd.Timestamp, end: pd.Timestamp, areas=None) -> dict[str, pd.Da
     days = pd.date_range(grid[0].tz_convert(TZ).normalize(), grid[-1].tz_convert(TZ), freq="D")
     parts = {area: [] for area in areas}
     for day in days:
-        for area, hourly in _run(day, areas).items():
+        try:
+            run = _run(day, areas)
+        except requests.HTTPError as e:
+            if e.response is None or e.response.status_code != 400:
+                raise
+            print(f"openmeteo {areas[0]}: no run for {day:%Y-%m-%d}, left empty")  # archive gap
+            continue
+        for area, hourly in run.items():
             parts[area].append(hourly)
         time.sleep(PAUSE * sum(len(POINTS[a]) for a in areas))
     out = {}
     for area, frames in parts.items():
+        if not frames:
+            raise ValueError(f"openmeteo {area}: no run for any day")
         hourly = pd.concat(frames)
         out[area] = hourly.reindex(grid, method="ffill", limit=3)  # hour -> its quarter-hours
     return out
