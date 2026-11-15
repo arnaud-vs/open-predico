@@ -180,9 +180,12 @@ its feature groups in `groups.toml`. Remaining Spain-specific code: `to_grid` (E
   (`elia:solar.*`, `data/elia.py`).
 - **Origin:** 09:00 Brussels for the 10:00 D+1 gate (hourly intraday sessions not covered).
 - **Capacity:** Elia monitored capacity 12.1 GW (2026-10-25), clip at 12.2 GW; max seen 8.6 GW.
-- **Features:** `target_elia` (past), `weather_be` (Open-Meteo ECMWF IFS 00 UTC run of D-1, out
-  ~06:40 UTC) and `weather_be_d2` (ICON-D2 03 UTC run of D-1, out ~05:00 UTC; archived since
-  2026-04-02), both over 11 province points weighted by PV capacity: future; `calendar`.
+- **Features:** `target_elia` (past); future: `weather_be` (Open-Meteo ECMWF IFS 00 UTC run of
+  D-1, out ~06:40 UTC), `weather_be_d2` (ICON-D2 03 UTC run of D-1, out ~05:00 UTC; archived since
+  2026-04-02), `weather_be_knmi` (KNMI HARMONIE-AROME 03 UTC run of D-1, out ~05:40 UTC; since
+  2026-04-06) and `weather_be_aifs` (ECMWF AIFS 00 UTC run of D-1, out ~05:40 UTC; since
+  2026-04-03), all over 11 province points weighted by PV capacity; `capacity_be` (Elia monitored
+  capacity, published ahead); `calendar`.
 - **Benchmark:** Elia's own forecast (`tso_forecast_be`, issued 11:00 D-1), Predico's owner
   benchmark, scored as config `elia_dayahead11h` (`experiment ... tso`).
 - **Backtest (2026-11-15, vs Elia's forecast `elia_dayahead11h`, ratio of mean RMSE / Winkler):**
@@ -191,10 +194,17 @@ its feature groups in `groups.toml`. Remaining Spain-specific code: `to_grid` (E
   both runs 1.11 / 1.03 (`t0gamma_cov_ctx90`), ECMWF 00 UTC 1.21 / 1.07, ICON-D2 alone 1.29 /
   1.24 (`t0gamma_cov_noecmwf_ctx90`); climatology 2.65 / 2.07. Elia issues at 11:00 D-1, after
   the gate. Coverage ~88% (Elia 85%): our bands are a bit wide.
-- **Live (production) since 2026-11-16:** `t0gamma_cov_ctx90` D+1 with both weather runs, climatology
-  D+2..D+10. `submit` at 09:15, `check` at 09:30/09:45 (the shared crons gained the 09 hour);
-  the run takes ~6.5 min (Open-Meteo: 22 points x 92 days). Intraday sessions are covered by
-  the same continuous forecast. `live = false` in targets.toml keeps a target out of live/.
+- **Ablation (2026-11-15, no holiday_es; 7 Apr to 25 Oct, 202 days / full year, RMSE / Winkler
+  ratio to Elia):** ECMWF + ICON-D2 1.143 / 1.026, full year 1.196 / 1.072
+  (`t0gamma_cov_ecmwfd2_ctx90`); + capacity 1.138 / 1.021 (`..._cap_`); + KNMI 1.102 / 0.989
+  (`..._knmi_`); + AIFS 1.102 / 0.976 (`..._aifs_`); all 1.076 / 0.958, full year 1.155 / 1.022
+  (`t0gamma_cov_ctx90`, live). Capacity alone barely helps; KNMI and AIFS each ~4%.
+- **Live (production) since 2026-11-16:** `t0gamma_cov_ctx90` D+1 with all four weather runs and
+  capacity (since 2026-11-15), climatology D+2..D+10. `submit` at 09:15, `check` at 09:30/09:45
+  (the shared crons gained the 09 hour). Open-Meteo: 4 requests x 11 points x ~92 days = ~4000
+  calls per run, under the free tier's 5000/h; a failed submit plus a `check` retry in the same
+  hour would exceed it. Intraday sessions are covered by the same continuous forecast.
+  `live = false` in targets.toml keeps a target out of live/.
 
 ## Predico rules that shape the repo
 
