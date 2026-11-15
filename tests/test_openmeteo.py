@@ -8,9 +8,9 @@ def test_each_local_day_reads_the_00z_run_of_the_day_before():
     assert openmeteo.run_time(day) == pd.Timestamp("2026-03-28 00:00", tz="UTC")
     origin = (day - pd.Timedelta(days=1)).replace(hour=14).tz_convert("UTC")
     assert openmeteo.run_time(day) + pd.Timedelta("8h") < origin  # published ~08:00 UTC
-    be = openmeteo.run_time(day, "be")  # Belgium: 18 UTC run of D-2, out before the 09:00 origin
-    assert be == pd.Timestamp("2026-03-27 18:00", tz="UTC")
-    assert be + pd.Timedelta("8h") < (day - pd.Timedelta(days=1)).replace(hour=9).tz_convert("UTC")
+    summer = pd.Timestamp("2026-06-02", tz="Europe/Brussels")  # Belgium: 00 UTC run, out ~06:40
+    origin = (summer - pd.Timedelta(days=1)).replace(hour=9).tz_convert("UTC")  # 07:00 UTC
+    assert openmeteo.run_time(summer, "be") + pd.Timedelta("6h40min") < origin
 
 
 def test_run_keeps_its_local_day_and_shifts_radiation_to_the_hour_it_ends(monkeypatch):

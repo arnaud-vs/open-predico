@@ -7,7 +7,7 @@ Every source used by open-predico, its license, and whether it may be used live.
 | [ESIOS](https://www.esios.ree.es/) (Red Eléctrica) | mFRR truth, market, forecasts, balancing, cross-border | to verify (REE legal notice) | to verify | to verify | planned | pending terms |
 | [ENTSO-E Transparency Platform](https://transparency.entsoe.eu/) | mFRR balancing energy bids (12.3.B/C, File Library), group `mfrr_bids` | ENTSO-E Transparency Platform terms of use: reuse allowed with source attribution; to confirm 12.3.B/C is on ENTSO-E's free re-use list | to confirm | "Source: ENTSO-E Transparency Platform" | not yet | pending terms |
 | [ENTSO-E Transparency Platform](https://transparency.entsoe.eu/) REST API | 50Hertz truth and features (`data/entsoe.py`): actual generation A75 (B16 solar, B18 wind offshore, B19 wind onshore), group `target_50hertz`; day-ahead wind/solar (A69) and load (A65) forecasts, group `entsoe_forecasts_50hertz` | ENTSO-E Transparency Platform terms of use: reuse allowed with source attribution | to confirm (A75/A69/A65 on ENTSO-E's free re-use list, to check) | "Source: ENTSO-E Transparency Platform" | German targets | pending terms |
-| [Open-Meteo](https://open-meteo.com/) Previous Runs API | 50Hertz weather (`data/openmeteo.py`): wind 10/100 m, radiation, cloud cover, temperature as forecast 48 h ahead, group `weather_50hertz` | Data CC BY 4.0; the free API is non-commercial only | **licence required for production** (API subscription; the maintainer buys it before production) | "Weather data by Open-Meteo.com" | German targets (playground) | pending terms |
+| [Open-Meteo](https://open-meteo.com/) Previous Runs API | 50Hertz and Belgian weather (`data/openmeteo.py`): ECMWF IFS (and ICON-D2 for Belgium) single runs; groups `weather_50hertz`, `weather_be`, `weather_be_d2` | Data CC BY 4.0; the free API is non-commercial only | **licence required for production** (API subscription; the maintainer buys it before production) | "Weather data by Open-Meteo.com" | German targets (playground) | pending terms |
 | [Elia Open Data](https://opendata.elia.be/) | Belgian solar truth and Elia's forecast (`data/elia.py`): ods032 `measured`, `dayahead11h*`, region Belgium; groups `target_elia`, `tso_forecast_be` | Elia Open Data Licence (to read: portal was down on 2026-11-13) | to verify | "Source: Elia" | not yet (backtest) | pending terms |
 
 Add a row when you add a source.
@@ -51,8 +51,10 @@ Thuringia) and two Baltic offshore points. One request per day for all points. F
 non-commercial; buy the API licence before production.
 
 Belgium (`weather_be`): one point per province (11), weighted by Elia's monitored PV capacity per
-province on 2026-10-25 (Flanders ~72%). Its 09:00 origin comes before the 00 UTC run lands, so it
-reads the 18 UTC run of D-2 (29 to 53 h ahead, out around 02:00 UTC).
+province on 2026-10-25 (Flanders ~72%). ECMWF runs land ~6h40 after init (06 UTC run: 12:40 UTC
+on 2026-11-14), so Belgium's 09:00 origin (07:00 UTC in summer) reads the 00 UTC run of D-1.
+`weather_be_d2`: same points from DWD's ICON-D2 (2 km, 48 h, every 3 h), 03 UTC run of D-1 (lands
+~1h55 after init); single runs archived since 2026-04-02 only.
 
 ## Elia Open Data
 

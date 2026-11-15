@@ -179,14 +179,17 @@ its feature groups in `groups.toml`. Remaining Spain-specific code: `to_grid` (E
   2026-10-25 (test period ends there); live needs ods209/ods210 (DATA_SOURCES.md).
 - **Origin:** 09:00 Brussels for the 10:00 D+1 gate (hourly intraday sessions not covered).
 - **Capacity:** Elia monitored capacity 12.1 GW (2026-10-25), clip at 12.2 GW; max seen 8.6 GW.
-- **Features:** `target_elia` (past), `weather_be` (Open-Meteo IFS 18 UTC run of D-2, 11
-  province points weighted by PV capacity: future), `calendar`.
+- **Features:** `target_elia` (past), `weather_be` (Open-Meteo ECMWF IFS 00 UTC run of D-1, out
+  ~06:40 UTC) and `weather_be_d2` (ICON-D2 03 UTC run of D-1, out ~05:00 UTC; archived since
+  2026-04-02), both over 11 province points weighted by PV capacity: future; `calendar`.
 - **Benchmark:** Elia's own forecast (`tso_forecast_be`, issued 11:00 D-1), Predico's owner
   benchmark, scored as config `elia_dayahead11h` (`experiment ... tso`).
-- **Backtest (2026-11-13, 2025-11-01 to 2026-10-25):** `t0gamma_cov_ctx90` RMSE 405, Winkler
-  1044, coverage 85%; Elia's forecast (`elia_dayahead11h`) RMSE 316, Winkler 912, coverage 88%;
-  `slot_climatology_28d` RMSE 826. t0 is ~28% behind Elia on RMSE (16-40% by quarter) and wins
-  36% of days. Elia issues at 11:00 D-1 with fresher weather than our 18 UTC D-2 run.
+- **Backtest (2026-11-15, vs Elia's forecast `elia_dayahead11h`, ratio of mean RMSE / Winkler):**
+  full year (2025-11-01 to 2026-10-25): t0 + ECMWF 18 UTC D-2 1.28 / 1.15 (benchmark v3), ECMWF
+  00 UTC 1.24 / 1.10 (`t0gamma_cov_noicond2_ctx90`). 2026-04-03 to 2026-10-25 (ICON-D2 days):
+  both runs 1.11 / 1.03 (`t0gamma_cov_ctx90`), ECMWF 00 UTC 1.21 / 1.07, ICON-D2 alone 1.29 /
+  1.24 (`t0gamma_cov_noecmwf_ctx90`); climatology 2.65 / 2.07. Elia issues at 11:00 D-1, after
+  the gate. Coverage ~88% (Elia 85%): our bands are a bit wide.
 - **Live:** not yet (`live = false` in targets.toml keeps it out of submit, check and publish).
 
 ## Predico rules that shape the repo

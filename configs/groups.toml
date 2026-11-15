@@ -119,12 +119,19 @@ holiday_de = { source = "calendar:holiday_de", availability = "future" }
 [target_elia]  # Elia's measured PV, Belgium total, MW: Predico's truth
 solar_be = { source = "elia:ods032.measured", availability = "past" }
 
-[weather_be]  # Open-Meteo ECMWF IFS, 18 UTC run of D-2, capacity-weighted over 11 provinces
+[weather_be]  # Open-Meteo ECMWF IFS, 00 UTC run of D-1, capacity-weighted over 11 provinces
 ghi_be = { source = "openmeteo:be.shortwave_radiation", availability = "future" }  # W/m2
 direct_radiation_be = { source = "openmeteo:be.direct_radiation", availability = "future" }
 diffuse_radiation_be = { source = "openmeteo:be.diffuse_radiation", availability = "future" }
 cloud_cover_be = { source = "openmeteo:be.cloud_cover", availability = "future" }  # %
 temperature_2m_be = { source = "openmeteo:be.temperature_2m", availability = "future" }  # °C
+
+[weather_be_d2]  # Open-Meteo ICON-D2 (DWD, 2 km), 03 UTC run of D-1, same points and weights
+ghi_be_d2 = { source = "openmeteo:be_d2.shortwave_radiation", availability = "future" }  # W/m2
+direct_radiation_be_d2 = { source = "openmeteo:be_d2.direct_radiation", availability = "future" }
+diffuse_radiation_be_d2 = { source = "openmeteo:be_d2.diffuse_radiation", availability = "future" }
+cloud_cover_be_d2 = { source = "openmeteo:be_d2.cloud_cover", availability = "future" }  # %
+temperature_2m_be_d2 = { source = "openmeteo:be_d2.temperature_2m", availability = "future" }
 
 # Elia's own forecast (Predico's benchmark), scored as config `elia_dayahead11h`: not a model
 # input. Published 11:00 D-1, an hour after the gate.

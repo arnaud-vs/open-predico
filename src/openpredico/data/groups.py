@@ -80,8 +80,12 @@ def _column(c: dict, raw: dict, grid: pd.DatetimeIndex, start, end, tz: str) -> 
     if prefix == "openmeteo":
         area, variable = key.split(".")
         # one request per day for every area and variable of the same run
-        run = openmeteo.EARLIER.get(area)
-        areas = [a for a in openmeteo.POINTS if openmeteo.EARLIER.get(a) == run]
+        run = openmeteo.RUN_SHIFT.get(area), openmeteo.AREA_MODEL.get(area)
+        areas = [
+            a
+            for a in openmeteo.POINTS
+            if (openmeteo.RUN_SHIFT.get(a), openmeteo.AREA_MODEL.get(a)) == run
+        ]
         return _once(raw, f"{prefix}{run}", lambda: openmeteo.fetch(start, end, areas))[area][
             variable
         ]

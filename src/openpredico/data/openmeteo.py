@@ -44,12 +44,19 @@ POINTS = {  # area -> [(lat, lon)]
         (49.95, 5.50),  # Luxembourg
     ],
 }
+POINTS["be_d2"] = POINTS["be"]  # same points, ICON-D2 (AREA_MODEL)
 # Weighted means (else plain): Elia's monitored PV capacity per province, MW, on 2026-10-25.
 # ponytail: fixed weights; capacity grows a few % a year, mostly in Flanders.
 WEIGHTS = {"be": [2029, 1565, 2040, 1912, 1168, 331, 358, 1058, 445, 854, 368]}
-# Belgium's 09:00 origin (10:00 gate) comes before the 00 UTC run lands (~08:00 UTC): its areas
-# read the 18 UTC run of D-2 (29 to 53 h ahead) instead.
-EARLIER = {"be": pd.Timedelta(hours=6)}
+WEIGHTS["be_d2"] = WEIGHTS["be"]
+# Areas fetched in their own request, with their run's shift back from 00 UTC of D-1. ECMWF runs
+# land ~6h40 after init (06 UTC run: 12:40 UTC on 2026-11-14), so the 00 UTC run is out ~06:40
+# UTC, before Belgium's 09:00 origin (07:00 UTC in summer); the 06 UTC run never is.
+# Backtest 2026-11-13 used the 18 UTC run of D-2 (shift 6 h) for Belgium (benchmark v3).
+# ICON-D2 (DWD, 2 km, 48 h, every 3 h; 03 UTC runs archived since 2026-04-02) lands ~1h55
+# after init (15 UTC run: 16:54 UTC on 2026-11-14): the 03 UTC run of D-1 is out ~05:00 UTC.
+RUN_SHIFT = {"be": pd.Timedelta(0), "be_d2": pd.Timedelta(hours=-3)}
+AREA_MODEL = {"be_d2": "icon_d2"}  # else MODEL
 VARIABLES = [
     "wind_speed_100m",
     "wind_speed_10m",
@@ -77,9 +84,9 @@ _session.mount(
 def fetch(start: pd.Timestamp, end: pd.Timestamp, areas=None) -> dict[str, pd.DataFrame]:
     """Per area, VARIABLES averaged over its points on the 15-min UTC grid [start, end).
 
-    `areas` (default: those reading the 00 UTC run) must share one run (EARLIER).
+    `areas` (default: those not in RUN_SHIFT) must share one run (RUN_SHIFT).
     """
-    areas = areas or [a for a in POINTS if a not in EARLIER]
+    areas = areas or [a for a in POINTS if a not in RUN_SHIFT]
     grid = pd.date_range(start, end, freq=STEP, inclusive="left", name="time")
     days = pd.date_range(grid[0].tz_convert(TZ).normalize(), grid[-1].tz_convert(TZ), freq="D")
     parts = {area: [] for area in areas}
@@ -95,9 +102,9 @@ def fetch(start: pd.Timestamp, end: pd.Timestamp, areas=None) -> dict[str, pd.Da
 
 
 def run_time(day: pd.Timestamp, area: str = "land") -> pd.Timestamp:
-    """The run a local target day reads: 00 UTC on the local day before, or EARLIER."""
+    """The run a local target day reads: 00 UTC on the local day before, minus RUN_SHIFT."""
     run = pd.Timestamp(f"{day - pd.Timedelta(days=1):%Y-%m-%d}", tz="UTC")
-    return run - EARLIER.get(area, pd.Timedelta(0))
+    return run - RUN_SHIFT.get(area, pd.Timedelta(0))
 
 
 def _run(day: pd.Timestamp, areas: list[str]) -> dict[str, pd.DataFrame]:
@@ -109,7 +116,7 @@ def _run(day: pd.Timestamp, areas: list[str]) -> dict[str, pd.DataFrame]:
             "latitude": ",".join(str(p[0]) for p in points),
             "longitude": ",".join(str(p[1]) for p in points),
             "hourly": ",".join(VARIABLES),
-            "models": MODEL,
+            "models": AREA_MODEL.get(areas[0], MODEL),
             "run": f"{run_time(day, areas[0]):%Y-%m-%dT%H:%M}",
             "forecast_days": 3,  # covers the local target day, plus an hour
             "timezone": "GMT",
