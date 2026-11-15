@@ -6,17 +6,20 @@ from openpredico.live.submit import not_ready
 class _Client:
     def coverage(self):
         rows = [{"challenge_id": "e", "ready": True}, {"challenge_id": "p", "ready": False}]
+        rows += [{"challenge_id": "i", "ready": False, "start": "2026-11-15T14:00:00+00:00"}]
         return {"data": {"coverage": rows + [{"challenge_id": "x", "ready": False}]}}
 
     def open_challenges(self, name):
         return {
             "spain_mfrr_energy": [{"id": "e", "resource_name": name}],
             "spain_mfrr_price": [{"id": "p", "resource_name": name}],
+            "belgium_solar_opendata_elia": [{"id": "i", "resource_name": name}],  # intraday
         }.get(name, [])  # no open German session
 
 
 def test_not_ready_only_lists_our_uncovered_challenges():
-    assert not_ready(_Client()) == ["spain_mfrr_price"]  # "x" belongs to someone else's target
+    now = pd.Timestamp("2026-11-15 13:30", tz="UTC")
+    assert not_ready(_Client(), now) == ["spain_mfrr_price"]  # "x" belongs to someone else's target
 
 
 def test_in_session_is_the_hour_before_each_gate():

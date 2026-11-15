@@ -156,16 +156,23 @@ def in_session(now: pd.Timestamp) -> list[str]:
     return out
 
 
-def not_ready(client: Predico) -> list[str]:
-    """Our targets with an open challenge that our forecasts don't fully cover yet."""
-    ready = {c["challenge_id"]: c["ready"] for c in client.coverage()["data"]["coverage"]}
-    names = [t["predico_resource"] for t in live_targets().values()]
-    return [
-        c["resource_name"]
-        for n in names
-        for c in client.open_challenges(n)
-        if not ready.get(c["id"])
-    ]
+def not_ready(client: Predico, now: pd.Timestamp) -> list[str]:
+    """Our targets with an open D+1 challenge that our forecasts don't fully cover yet.
+
+    Challenges starting before the target's next local midnight are intraday (Belgium, hourly):
+    our forecast starts at D+1, so they are never covered and not counted.
+    """
+    cov = {c["challenge_id"]: c for c in client.coverage()["data"]["coverage"]}
+    out = []
+    for t in live_targets().values():
+        tomorrow = now.tz_convert(t["timezone"]).normalize() + pd.DateOffset(days=1)
+        for c in client.open_challenges(t["predico_resource"]):
+            row = cov.get(c["id"], {})
+            if row.get("start") and pd.Timestamp(row["start"]) < tomorrow:
+                continue  # ponytail: intraday not forecast; add a from-now run to cover it
+            if not row.get("ready"):
+                out.append(c["resource_name"])
+    return out
 
 
 def not_run(now: pd.Timestamp, files: list[str]) -> list[str]:
@@ -184,7 +191,7 @@ def missing(client: Predico, now: pd.Timestamp) -> list[str]:
     """Targets to resubmit: not covered on Predico, or no t0 run of ours today."""
     by_resource = {t["predico_resource"]: n for n, t in live_targets().items()}
     files = HfApi().list_repo_files(f"{hf.ORG}/live-private", repo_type="dataset")
-    pending = {by_resource[r] for r in not_ready(client)} | set(not_run(now, files))
+    pending = {by_resource[r] for r in not_ready(client, now)} | set(not_run(now, files))
     if pair_needs_retry(now, files):
         pending.add("germany_wind_50hertz_ca")
     return sorted(pending)
