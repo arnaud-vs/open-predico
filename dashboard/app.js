@@ -253,6 +253,7 @@ async function renderLive(root) {
         : pgDays.length
           ? `<div class="banner">Days marked <b>*</b> (shaded in the chart) were qualifying runs on the Predico playground, before production; Predico never scored them.</div>`
           : "";
+    const t50 = T.t50 ?? nul(), hasTso = t50.some(v => v != null);
     const body = root.querySelector("#lv-body");
     body.innerHTML = `${envNote}
       <div class="card">
@@ -287,7 +288,6 @@ async function renderLive(root) {
       <div class="card"><div class="card-head"><div><h2>Daily scores</h2><p class="sub">Every target day, newest first. Click a row to show it in the chart.</p></div></div>
         <div class="tablewrap" style="max-height:520px" id="lv-daily"></div></div>`;
 
-    const t50 = T.t50 ?? nul(), hasTso = t50.some(v => v != null);
     const data = [x, e10, e90, s50, T.q50, T.b50, T.obs, t50];
     const span = x[n - 1] - x[0];
     let range = "7";
@@ -741,20 +741,21 @@ async function renderFeatures(root) {
 
 function drawMap(el, geo) {
   const map = L.map(el, { scrollWheelZoom: false });
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 12, attribution: "© OpenStreetMap" }).addTo(map);
   const regions = L.geoJSON(geo.regions, {
     style: { color: css("--accent-ink"), weight: 1.5, fillColor: css("--accent"), fillOpacity: 0.12 },
     onEachFeature: (f, layer) => layer.bindTooltip(esc(f.properties.name)),
-  }).addTo(map);
+  });
   const bounds = regions.getBounds();
+  for (const s of geo.sets) for (const [lat, lon] of s.points) bounds.extend([lat, lon]);
+  map.fitBounds(bounds.pad(0.05));  // view first: vector layers added to a map without one throw
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 12, attribution: "© OpenStreetMap" }).addTo(map);
+  regions.addTo(map);
   for (const s of geo.sets) for (const [lat, lon, w] of s.points) {
     const r = s.weighted ? 5 + Math.sqrt(w) * 30 : 7;
     L.circleMarker([lat, lon], { radius: r, color: css("--surface"), weight: 2, fillColor: css("--tso"), fillOpacity: 0.9 })
       .bindTooltip(`${lat.toFixed(2)}, ${lon.toFixed(2)}${s.weighted ? ` · weight ${(w * 100).toFixed(1)}%` : ""}<br>${s.runs.join(", ")}`)
       .addTo(map);
-    bounds.extend([lat, lon]);
   }
-  map.fitBounds(bounds.pad(0.05));
 }
 
 // --- Targets (Predico resources) --------------------------------------------------------
