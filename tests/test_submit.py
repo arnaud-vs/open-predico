@@ -43,3 +43,25 @@ def test_forecast_generation_sees_own_groups_and_is_clipped():
     validate(fc, now)
     assert seen == {"past": ["wind_50hertz", "solar_50hertz"], "future": ["holiday_de"]}
     assert fc.q10.min() == 0 and fc.q90.max() == 24500  # clipped to [0, capacity]
+
+
+def test_forecast_drops_a_weather_model_missing_on_d1_or_absent():
+    now = pd.Timestamp("2026-11-15 08:15", tz="UTC")  # Belgium, D+1 = 16 Nov
+    idx = pd.date_range("2026-08-01", "2026-11-18", freq="15min", tz="UTC", inclusive="left")
+    knmi = pd.DataFrame({"ghi_be_knmi": 1.0}, index=idx)
+    knmi.loc[knmi.index >= "2026-11-15 23:00", "ghi_be_knmi"] = None  # KNMI run missing for D+1
+    frames = {  # weather_be_aifs absent: its source failed (lenient build)
+        "target_elia": pd.DataFrame({"solar_be": 5.0}, index=idx),
+        "weather_be": pd.DataFrame({"ghi_be": 1.0}, index=idx),
+        "weather_be_knmi": knmi,
+    }
+    seen = {}
+
+    def predict(past, future, days):
+        seen.update(past=list(past.columns), future=list(future.columns))
+        grid = pd.date_range(days[0], periods=96, freq="15min").tz_convert("UTC")
+        return pd.DataFrame({"q10": 1.0, "q50": 2.0, "q90": 3.0}, index=grid)
+
+    fc, _ = forecast("belgium_solar_opendata_elia", frames, predict, now)
+    validate(fc, now)
+    assert seen == {"past": ["solar_be"], "future": ["ghi_be"]}

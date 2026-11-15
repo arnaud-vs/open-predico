@@ -74,3 +74,12 @@ def publish() -> None:
         publish.main()
     finally:  # the dashboard refreshes even if publishing failed (it shows what is there)
         subprocess.run([sys.executable, "/dashboard/build.py", "--upload"], check=True)
+
+
+@app.function(cpu=1.0, memory=4096, timeout=1800)
+def dry_run(only: list[str]) -> None:
+    """Forecast `only` without submitting or uploading (no Predico login). Spawn it from a
+    deployed app: `modal.Function.from_name("open-predico", "dry_run").spawn([...])`."""
+    from openpredico.live import submit
+
+    submit.main(dry_run=True, only=only)
