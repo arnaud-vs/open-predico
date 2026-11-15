@@ -203,7 +203,8 @@ its feature groups in `groups.toml`. Remaining Spain-specific code: `to_grid` (E
   capacity (since 2026-11-15), climatology D+2..D+10. `submit` at 09:15, `check` at 09:30/09:45
   (the shared crons gained the 09 hour). Open-Meteo: 4 requests x 11 points x ~92 days = ~4000
   calls per run, under the free tier's 5000/h; a failed submit plus a `check` retry in the same
-  hour would exceed it. Intraday sessions are covered by the same continuous forecast.
+  hour would exceed it. Intraday challenges (hourly, starting the same day) are not covered:
+  the forecast starts at D+1, and `check` skips them.
   `live = false` in targets.toml keeps a target out of live/.
 
 ## Predico rules that shape the repo
