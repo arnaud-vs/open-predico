@@ -132,6 +132,7 @@ def run_time(day: pd.Timestamp, area: str = "land") -> pd.Timestamp:
 def _run(day: pd.Timestamp, areas: list[str]) -> dict[str, pd.DataFrame]:
     """Hourly forecasts of the areas' run for the hours of local `day`, mean per area."""
     points = [p for a in areas for p in POINTS[a]]
+    started = time.time()
     resp = _session.get(
         BASE_URL,
         params={
@@ -146,6 +147,8 @@ def _run(day: pd.Timestamp, areas: list[str]) -> dict[str, pd.DataFrame]:
         },
         timeout=60,
     )
+    if (took := time.time() - started) > 20:  # retries are silent otherwise
+        print(f"openmeteo {areas[0]} {day:%Y-%m-%d}: {took:.0f} s, HTTP {resp.status_code}")
     resp.raise_for_status()
     locations = resp.json()
     locations = locations if isinstance(locations, list) else [locations]

@@ -7,6 +7,7 @@ Needs the t0 extra: `uv sync --extra t0`.
 """
 
 import sys
+import time
 from collections.abc import Callable
 
 import pandas as pd
@@ -39,7 +40,12 @@ def build_frames(
     end = (local.normalize() + pd.DateOffset(days=2)).tz_convert("UTC")
     start, end = start.tz_localize(None).isoformat(), end.tz_localize(None).isoformat()
     # ponytail: ~30 ESIOS ids x 4 monthly chunks at 1 req/s, refetched daily; cache on HF if slow
-    return {g: build(g, start, end, tz, lenient=True) for g in groups}
+    out = {}
+    for g in groups:
+        t0_ = time.time()
+        out[g] = build(g, start, end, tz, lenient=True)
+        print(f"built {g} in {time.time() - t0_:.0f} s")  # timing only, no values
+    return out
 
 
 def forecast(
