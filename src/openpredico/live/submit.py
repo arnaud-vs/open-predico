@@ -15,9 +15,9 @@ from huggingface_hub import HfApi
 
 from openpredico.config import live_targets
 from openpredico.data import hf
-from openpredico.data.groups import build
+from openpredico.data.groups import build, load_groups
 from openpredico.evaluation.backtest import PUBLICATION_LAG, clip
-from openpredico.evaluation.experiment import CATEGORICAL, features
+from openpredico.evaluation.experiment import CATEGORICAL, features, load_benchmark
 from openpredico.live.predico import Predico
 from openpredico.live.wind_pair_consumer import needs_retry as pair_needs_retry
 from openpredico.live.wind_pair_consumer import ready as ready_wind_pair
@@ -28,24 +28,55 @@ MODEL = "theforecastingcompany/t0-gamma"  # best Apache-2.0 model in the backtes
 CONFIG, FALLBACK = "t0gamma_cov_ctx90", "slot_climatology_28d"  # backtest config names
 CONTEXT_DAYS = 90
 HORIZON_DAYS = 10
+ARCHIVE = "archive/{}.parquet"  # weather archive per group, benchmark repo
 
 
 def build_frames(
-    now: pd.Timestamp, groups: list[str], tz: str, first: pd.Timestamp | None = None
+    now: pd.Timestamp,
+    groups: list[str],
+    tz: str,
+    first: pd.Timestamp | None = None,
+    save: bool = False,
 ) -> dict[str, pd.DataFrame]:
-    """`groups` from CONTEXT_DAYS before `first` (default now) through the end of now's D+1."""
+    """`groups` from CONTEXT_DAYS before `first` (default now) through the end of now's D+1.
+
+    Weather groups come from their archive (`archived`); `save` writes the extended archive.
+    """
     local = now.tz_convert(tz)
     since = (first if first is not None else now).tz_convert(tz)
     start = (since - pd.Timedelta(days=CONTEXT_DAYS + 1)).normalize().tz_convert("UTC")
     end = (local.normalize() + pd.DateOffset(days=2)).tz_convert("UTC")
-    start, end = start.tz_localize(None).isoformat(), end.tz_localize(None).isoformat()
     # ponytail: ~30 ESIOS ids x 4 monthly chunks at 1 req/s, refetched daily; cache on HF if slow
-    out = {}
+    out, groups_toml = {}, load_groups()
     for g in groups:
         t0_ = time.time()
-        out[g] = build(g, start, end, tz, lenient=True)
+        if all(c["source"].startswith("openmeteo:") for c in groups_toml[g].values()):
+            out[g] = archived(g, start, end, tz, save)
+        else:
+            out[g] = build(g, *(t.tz_localize(None).isoformat() for t in (start, end)), tz, True)
         print(f"built {g} in {time.time() - t0_:.0f} s")  # timing only, no values
     return out
+
+
+def archived(g: str, start: pd.Timestamp, end: pd.Timestamp, tz: str, save: bool) -> pd.DataFrame:
+    """Weather group `g` on [start, end) from its archive on HF (`benchmark/archive/<g>.parquet`),
+    extended with the days from its last complete day on: an archived run never changes, so each
+    run fetches ~3 days instead of the whole context. Old days are kept (the growing backtest
+    set). Seeded from the backtest backfill (`load_benchmark`) if there is no archive yet."""
+    try:
+        old = hf.download("benchmark", ARCHIVE.format(g))
+    except Exception:  # no archive yet (or HF down): seed from the backfill, else fetch it all
+        old = load_benchmark({g}).get(g, pd.DataFrame())
+    complete = old.dropna().index
+    since = start if complete.empty else max(start, complete.max().floor("D") - pd.Timedelta("1D"))
+    new = build(g, *(t.tz_localize(None).isoformat() for t in (since, end)), tz, lenient=True)
+    merged = new.combine_first(old).sort_index()
+    if save and not new.empty:
+        hf.upload(
+            merged, "benchmark", ARCHIVE.format(g), f"Weather archive {g}: through {end:%Y-%m-%d}"
+        )
+    grid = pd.date_range(start, end, freq="15min", inclusive="left", name="time")
+    return merged.reindex(grid)
 
 
 def forecast(
@@ -102,7 +133,7 @@ def main(dry_run: bool, only: list[str] | None = None) -> None:
                 predict = t0.make_predict(t0.load(MODEL), CONTEXT_DAYS, CATEGORICAL)
             key = (tuple(target["groups"]), target["timezone"])
             if key not in built:
-                built[key] = build_frames(now, *key)
+                built[key] = build_frames(now, *key, save=not dry_run)
             fc, inputs = forecast(name, built[key], predict, now)
         validate(fc, now)
         print(f"{name}: {len(fc)} steps {fc.index.min()} .. {fc.index.max()}")  # no values

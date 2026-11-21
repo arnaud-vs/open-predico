@@ -65,3 +65,28 @@ def test_forecast_drops_a_weather_model_missing_on_d1_or_absent():
     fc, _ = forecast("belgium_solar_opendata_elia", frames, predict, now)
     validate(fc, now)
     assert seen == {"past": ["solar_be"], "future": ["ghi_be"]}
+
+
+def test_archived_fetches_only_new_days_and_keeps_old_ones(monkeypatch):
+    from openpredico.live import submit
+
+    idx = pd.date_range("2026-01-01", "2026-11-20", freq="15min", tz="UTC", inclusive="left")
+    old = pd.DataFrame({"ghi_be": 1.0}, index=idx)
+    calls, saved = [], {}
+
+    def build(g, start, end, tz, lenient):
+        calls.append(start)
+        grid = pd.date_range(start, end, freq="15min", tz="UTC", inclusive="left")
+        return pd.DataFrame({"ghi_be": 2.0}, index=grid)
+
+    monkeypatch.setattr(submit.hf, "download", lambda repo, path: old)
+    monkeypatch.setattr(submit.hf, "upload", lambda df, *a: saved.update(df=df))
+    monkeypatch.setattr(submit, "build", build)
+    start, end = pd.Timestamp("2026-08-20", tz="UTC"), pd.Timestamp("2026-11-22", tz="UTC")
+    out = submit.archived("weather_be", start, end, "Europe/Brussels", save=True)
+    assert calls == ["2026-11-18T00:00:00"]  # from the day before the last complete day
+    assert out.index[0] == start and out.index[-1] < end and out.notna().all().all()
+    assert (out.loc[:"2026-11-17", "ghi_be"] == 1).all() and (
+        out.loc["2026-11-18":, "ghi_be"] == 2
+    ).all()
+    assert saved["df"].index[0] == idx[0]  # old days kept

@@ -249,7 +249,7 @@ def test_main_prefers_pair_without_loading_incumbent_and_falls_back(case, monkey
     assert calls == []
     monkeypatch.setattr(submit, "ready_wind_pair", lambda *a: None)
     monkeypatch.setattr(submit.t0, "make_predict", lambda *a: object())
-    monkeypatch.setattr(submit, "build_frames", lambda *a: {})
+    monkeypatch.setattr(submit, "build_frames", lambda *a, **k: {})
     monkeypatch.setattr(submit, "forecast", lambda *a: (case["forecast"], case["inputs"]))
     submit.main(dry_run=True, only=[bundle.TARGET])
     assert calls == ["load"]
