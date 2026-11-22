@@ -12,7 +12,8 @@ openmeteo.VARIABLES (area-weighted means, like openmeteo._run), `available` (UTC
 
 `available`: when the run's data_run/.../meta.json landed in Open-Meteo's S3 bucket
 (created_at; a few minutes after the API serves it, so conservative). The bucket keeps 3 months,
-so older runs get run + the group's median latency, flagged `available_estimated`.
+so older runs get run + the group's median latency for that run hour (ECMWF 00/12 UTC runs
+land ~30 min later than 06/18), flagged `available_estimated`.
 The bucket's .om files can't replace the API: they hold raw fields (no diffuse radiation or
 100 m wind for some models, AIFS 6-hourly) that the API derives and interpolates.
 """
@@ -74,13 +75,20 @@ def assemble(group, known):
         if len(df):
             parts[pd.Timestamp(f.stem, tz="UTC")] = df
     df = pd.concat(parts, names=["run", "time"])
-    avail = {r: known.get(f"{group} {r:%Y-%m-%dT%H}") for r in parts}
-    avail = pd.to_datetime(pd.Series({r: a for r, a in avail.items()}), utc=True)
+    seen = {
+        pd.Timestamp(k.split()[1], tz="UTC"): pd.Timestamp(v)
+        for k, v in known.items()
+        if v and k.split()[0] == group
+    }
+    seen = pd.Series(seen, dtype="datetime64[ns, UTC]")
+    lag = (seen - seen.index).groupby(seen.index.hour).median()  # per run hour
+    runs = pd.DatetimeIndex(list(parts))
+    avail = seen.reindex(runs)
     estimated = avail.isna()
-    avail = avail.fillna(pd.Series(avail.index + (avail - avail.index).median(), avail.index))
+    avail = avail.fillna(pd.Series(runs + lag.reindex(runs.hour).to_numpy(), runs))
     run = df.index.get_level_values("run")
-    df["available"] = avail.reindex(run).to_numpy()
-    df["available_estimated"] = estimated.reindex(run).to_numpy()
+    df["available"] = avail.reindex(run).set_axis(df.index)
+    df["available_estimated"] = estimated.reindex(run).set_axis(df.index)
     return df
 
 
