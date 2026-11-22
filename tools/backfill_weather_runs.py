@@ -3,7 +3,7 @@
 Usage: uv run python tools/backfill_weather_runs.py [--start 2026-04-07] [--end 2026-11-22]
        uv run python tools/backfill_weather_runs.py --status
 
-One Single Runs API request per run (11 points = 11 calls), oldest run first, all groups
+One Single Runs API request per run (11 points = 11 calls), newest run first, all groups
 interleaved. Paced to --daily-calls per 24 h (any 24 h window stays under it; the free tier
 allows 10000/day and live runs need the rest). Resumable: each run is cached as
 data/archive_runs/<group>/<run>.parquet (empty if not archived); rerun to resume.
@@ -39,13 +39,13 @@ S3 = "https://openmeteo.s3.amazonaws.com/data_run"
 
 
 def runs(start, end):
-    """(run, group) for every scheduled run in [start, end), oldest first."""
+    """(run, group) for every scheduled run in [start, end), newest first (usable soonest)."""
     out = [
         (r, g)
         for g, (_, every, _) in GROUPS.items()
         for r in pd.date_range(start, end, freq=f"{every}h", inclusive="left", tz="UTC")
     ]
-    return sorted(out)
+    return sorted(out, reverse=True)
 
 
 def path(group, run):
