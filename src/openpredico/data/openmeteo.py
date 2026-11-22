@@ -12,7 +12,6 @@ non-commercial (DATA_SOURCES.md).
 """
 
 import logging
-import os
 import time
 
 import pandas as pd
