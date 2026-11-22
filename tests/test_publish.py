@@ -30,3 +30,22 @@ def test_gate_closes_is_d_minus_1_at_gate_local():
     idx = pd.DatetimeIndex(["2026-11-06 23:00", "2026-11-07 22:45"], tz="UTC")  # Nov 7 Madrid
     closes = gate_closes(idx, TZ, "17:00")
     assert (closes == pd.Timestamp("2026-11-06 17:00", tz=TZ)).all()
+
+
+def test_incremental_window_reads_only_the_runs_predico_sliced():
+    from openpredico.live.publish import WINDOW_DAYS, runs_to_read, window_start
+
+    now = pd.Timestamp("2026-11-20 17:00", tz="UTC")  # Nov 21 gate (16:00 UTC) passed
+    published = pd.date_range("2026-11-01", "2026-11-20 23:45", freq="15min", tz=TZ)
+    start = window_start(published.tz_convert("UTC"), TZ, now)
+    assert start == pd.Timestamp("2026-11-20", tz=TZ) - pd.DateOffset(days=WINDOW_DAYS)
+    assert window_start(None, TZ, now) is None  # nothing published: rebuild all
+    stalled = window_start(published[:96].tz_convert("UTC"), TZ, now)  # last publish: Nov 1
+    assert stalled == pd.Timestamp("2026-11-02", tz=TZ)
+
+    stamps = [pd.Timestamp(f"2026-11-{d:02d} 15:15", tz="UTC") for d in range(1, 21)]
+    stamps.remove(pd.Timestamp("2026-11-17 15:15", tz="UTC"))  # failed: Nov 18 takes Nov 16's
+    stamps.append(pd.Timestamp("2026-11-20 16:30", tz="UTC"))  # after the gate: never sliced
+    got = runs_to_read(stamps, start, TZ, "17:00", now)
+    lo, hi = pd.Timestamp("2026-11-12", tz="UTC"), pd.Timestamp("2026-11-20 16:00", tz="UTC")
+    assert got == {s for s in stamps if lo <= s < hi}  # Nov 13..21 from the Nov 12..20 runs

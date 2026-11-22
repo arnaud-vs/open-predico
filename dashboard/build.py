@@ -7,6 +7,7 @@ push the static Space. The page only draws: every score here uses evaluation/met
 """
 
 import argparse
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -15,6 +16,8 @@ import numpy as np
 import pandas as pd
 import requests
 from huggingface_hub import HfApi
+from huggingface_hub.hf_api import RepoFile
+from huggingface_hub.utils.sha import git_hash
 
 from openpredico.config import load_targets
 from openpredico.data import openmeteo
@@ -150,9 +153,8 @@ def describe(source: str, names: dict) -> str:
         return f"ENTSO-E {document} {ENTSOE[document]} ({what}), 50Hertz control area"
     if prefix == "openmeteo":
         area, variable = key.split(".")
-        model = "ICON-D2 03 UTC" if area.endswith("_d2") else "ECMWF IFS 00 UTC"
         how = "capacity-weighted mean" if area.startswith("be") else "mean"
-        return f"Open-Meteo {variable}, {model} run of D-1, {how} over the {area} points"
+        return f"Open-Meteo {variable}, {run_label(area)} run of D-1, {how} over the {area} points"
     if prefix == "elia":
         return f"Elia Open Data {key.split('.')[1]}, Belgium total (ods032, then ods209/ods210)"
     if prefix == "calendar":
@@ -201,6 +203,29 @@ RUNS = {"ecmwf_ifs": "ECMWF IFS"} | {
 }
 
 
+def run_hour(area: str) -> int:
+    """UTC hour of the run of D-1 (or D-2 for a positive shift) that an area reads."""
+    shift = openmeteo.RUN_SHIFT.get(area, pd.Timedelta(0))
+    return (pd.Timedelta(days=1) - shift).seconds // 3600 % 24
+
+
+def run_label(area: str) -> str:
+    """e.g. "ECMWF IFS 00 UTC": the model and run hour an Open-Meteo area reads."""
+    return f"{RUNS[openmeteo.AREA_MODEL.get(area, openmeteo.MODEL)]} {run_hour(area):02d} UTC"
+
+
+def weather_areas(shorts: dict) -> set[str]:
+    """The Open-Meteo areas the targets' feature groups read."""
+    groups, targets = load_groups(), load_targets()
+    return {
+        c["source"].split(":")[1].split(".")[0]
+        for t in shorts
+        for g in targets[t]["groups"]
+        for c in groups[g].values()
+        if c["source"].startswith("openmeteo:")
+    }
+
+
 def _round(coords):
     return (
         [_round(c) for c in coords]
@@ -211,15 +236,9 @@ def _round(coords):
 
 def geo(out: Path) -> None:
     """Per market with Open-Meteo inputs: region outlines and the weather points (weight share)."""
-    groups, targets, data = load_groups(), load_targets(), {}
+    data = {}
     for market, shorts in MARKETS.items():
-        areas = {
-            c["source"].split(":")[1].split(".")[0]
-            for t in shorts
-            for g in targets[t]["groups"]
-            for c in groups[g].values()
-            if c["source"].startswith("openmeteo:")
-        }
+        areas = weather_areas(shorts)
         if not areas:
             continue
         region = REGIONS["be" if market.startswith("be") else "de"]
@@ -237,9 +256,7 @@ def geo(out: Path) -> None:
         for a in sorted(areas):
             points, w = openmeteo.POINTS[a], openmeteo.WEIGHTS.get(a)
             w = w or [1] * len(points)
-            shift = openmeteo.RUN_SHIFT.get(a, pd.Timedelta(0))
-            hour = (pd.Timedelta(days=1) - shift).seconds // 3600 % 24
-            run = f"{RUNS[openmeteo.AREA_MODEL.get(a, openmeteo.MODEL)]} {hour:02d} UTC"
+            run = run_label(a)
             shares = [[p[0], p[1], round(x / sum(w), 4)] for p, x in zip(points, w, strict=True)]
             entry = sets.setdefault(
                 tuple(points),
@@ -254,6 +271,47 @@ def geo(out: Path) -> None:
             "sets": list(sets.values()),
         }
     write(out, "geo.json", data)
+
+
+# The live submit cron runs at :15 in the hour before the gate (live/modal_app.py).
+SUBMIT_BEFORE_GATE = pd.Timedelta("45min")
+
+
+def weather(out: Path, now: pd.Timestamp) -> None:
+    """Per market with Open-Meteo inputs, for today's D+1 session (D-1 = today, local): each
+    weather model's archived runs (cycle, latency), the run we read, and origin, submit and gate
+    as UTC seconds. Today's local day bounds too, for the hourly intraday gates."""
+    data = {}
+    for market, shorts in MARKETS.items():
+        areas = weather_areas(shorts)
+        if not areas:
+            continue
+        t = load_targets()[next(iter(shorts))]
+        today = now.tz_convert(t["timezone"]).normalize()
+        origin, gate = (today + pd.Timedelta(f"{t[k]}:00") for k in ("origin", "gate"))
+        models = {}
+        for a in sorted(areas):
+            model = openmeteo.AREA_MODEL.get(a, openmeteo.MODEL)
+            used = openmeteo.run_time(today + pd.DateOffset(days=1), a)  # for target day D+1
+            models.setdefault(
+                model,
+                {
+                    "name": RUNS[model],
+                    "cycle": openmeteo.CYCLE[model] * 3600,
+                    "latency": int(openmeteo.LATENCY[model].total_seconds()),
+                    "used": secs(used),
+                },
+            )
+        data[market] = {
+            "day": f"{today:%Y-%m-%d}",
+            "origin": secs(origin),
+            "submit": secs(gate - SUBMIT_BEFORE_GATE),
+            "gate": secs(gate),
+            "day_start": secs(today),
+            "day_end": secs(today + pd.DateOffset(days=1)),
+            "models": list(models.values()),
+        }
+    write(out, "weather.json", data)
 
 
 def live_frames(demo: bool) -> tuple[dict[str, pd.DataFrame], pd.DataFrame | None]:
@@ -349,6 +407,42 @@ def live(out: Path, demo: bool) -> None:
     write(out, "live.json", data)
 
 
+SPACE = f"{ORG}/dashboard"
+UPLOAD = ["index.html", "app.js", "README.md", "data/**"]
+
+
+def unchanged(meta: dict) -> bool:
+    """True if the Space already serves every file we would upload, and the same meta.json
+    apart from `generated`: then an upload would only bump the build time."""
+    api = HfApi()
+    try:
+        old = json.loads(
+            Path(api.hf_hub_download(SPACE, "data/meta.json", repo_type="space")).read_text()
+        )
+    except Exception:  # first upload
+        return False
+    if {**old, "generated": None} != {**json.loads(json.dumps(meta)), "generated": None}:
+        return False
+    remote = {
+        f.path: f
+        for f in api.list_repo_tree(SPACE, repo_type="space", recursive=True)
+        if isinstance(f, RepoFile)
+    }
+    local = [*(HERE / n for n in UPLOAD[:3]), *(HERE / "data").rglob("*.json")]
+    for path in local:
+        rel, data = path.relative_to(HERE).as_posix(), path.read_bytes()
+        if rel == "data/meta.json":
+            continue
+        f = remote.get(rel)
+        if f is None or (
+            hashlib.sha256(data).hexdigest() != f.lfs.sha256
+            if f.lfs
+            else git_hash(data) != f.blob_id
+        ):
+            return False
+    return True
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--out", type=Path, default=HERE / "data")
@@ -361,6 +455,7 @@ def main() -> None:
     target_series(a.out)
     catalog(a.out)
     geo(a.out)
+    weather(a.out, pd.Timestamp.now(tz="UTC"))
     live(a.out, a.demo_live)
     meta |= {
         "generated": pd.Timestamp.now(tz="UTC").isoformat(timespec="minutes"),
@@ -369,13 +464,16 @@ def main() -> None:
         "units": UNITS,
         "short": SHORT,
     }
+    if a.upload and unchanged(meta):
+        print("dashboard unchanged apart from the build time: no Space commit")
+        return
     write(a.out, "meta.json", meta)
     if a.upload:
         HfApi().upload_folder(
-            repo_id=f"{ORG}/dashboard",
+            repo_id=SPACE,
             repo_type="space",
             folder_path=HERE,
-            allow_patterns=["index.html", "app.js", "README.md", "data/**"],
+            allow_patterns=UPLOAD,
             delete_patterns=["app.py", "requirements.txt"],  # the old stlite app
             commit_message=f"Dashboard data {meta['generated']}",
         )
