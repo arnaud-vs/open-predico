@@ -107,3 +107,20 @@ def test_stale_history_fails_instead_of_reusing_old_intervals():
     )
     with pytest.raises(ValueError, match="stale"):
         run(h)
+
+
+def test_backtest_recalibrate_narrows_wide_bands_from_past_days_only():
+    from openpredico.models.conformal import recalibrate
+
+    idx = pd.date_range("2026-01-01", "2026-03-31 23:45", freq="15min", tz="Europe/Brussels")
+    obs = pd.Series(range(len(idx)), index=idx.tz_convert("UTC"), dtype=float) % 7
+    preds = pd.DataFrame({"q10": obs - 50, "q50": obs, "q90": obs + 50, "obs": obs})
+    out = recalibrate(preds, "Europe/Brussels")
+    late = out.index >= pd.Timestamp("2026-03-01", tz="UTC")
+    assert out.q10[late].eq(out.obs[late]).all() and out.q90[late].eq(out.obs[late]).all()
+    # the first 31 days have < 30 calibration days: the model's own band stays
+    assert out.q90.iloc[0] == 50 and out.q50.equals(preds.q50)
+    preds.loc[preds.index >= pd.Timestamp("2026-03-20", tz="UTC"), "obs"] = 1e6  # future truth
+    again = recalibrate(preds, "Europe/Brussels")
+    early = out.index < pd.Timestamp("2026-03-21", tz="Europe/Brussels")
+    pd.testing.assert_series_equal(again.q90[early], out.q90[early])

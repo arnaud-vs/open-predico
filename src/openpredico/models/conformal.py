@@ -6,6 +6,7 @@ Temporal dependence means the nominal coverage is a target, not a distribution-f
 
 import math
 
+import numpy as np
 import pandas as pd
 
 TZ = "Europe/Berlin"
@@ -25,6 +26,12 @@ def _grid(frame: pd.DataFrame) -> None:
         raise ValueError("a UTC DatetimeIndex is required")
     if frame.index.has_duplicates or not frame.index.is_monotonic_increasing:
         raise ValueError("duplicate or unsorted timestamps")
+
+
+def rank(n: int, tail_probability: float) -> int:
+    """Finite-sample conformal rank: the k-th smallest of n scores bounds a new one with
+    probability >= 1 - tail_probability (k > n: too few scores)."""
+    return math.ceil((n + 1) * (1 - tail_probability))
 
 
 def total_point(onshore: pd.Series, offshore: pd.Series) -> pd.DataFrame:
@@ -117,10 +124,9 @@ def calibrate(
     scores = h.groupby(["day", "slot"])[["lower_score", "upper_score"]].max()
     bounds = {}
     for slot, group in scores.groupby("slot"):
-        n = len(group)
-        k = math.ceil((n + 1) * (1 - tail_probability))
-        if n < min_days or k > n:
+        if len(group) < min_days or len(group) < rank(len(group), tail_probability):
             raise ValueError("insufficient per-slot conformal calibration")
+        k = rank(len(group), tail_probability)
         bounds[slot] = [
             max(0.0, group[c].sort_values().iloc[k - 1]) for c in ["lower_score", "upper_score"]
         ]
@@ -141,3 +147,74 @@ def calibrate(
         "pipeline": pipeline,
         "truth_source": truth_source,
     }
+
+
+def recalibrate(
+    preds: pd.DataFrame,
+    tz: str,
+    *,
+    band: bool = True,
+    window_days: int = 60,
+    min_days: int = 30,
+    tail_probability: float = 0.1,
+) -> pd.DataFrame:
+    """Backtest predictions (q10, q50, q90, obs on a UTC index) with rolling conformal Q10/Q90.
+
+    Same rule as `calibrate` (per local slot, one-sided signed scores, the `rank`-th of the last
+    `window_days` complete days), applied to a whole backtest at once. `band=True` conformalizes
+    the model's own Q10/Q90 (CQR: each bound moves by its score, so too-wide bands narrow);
+    `band=False` rebuilds them around Q50 as the wind pair does. Q50 is unchanged. Slots with
+    fewer than `min_days` scores keep the model's own Q10/Q90. Not clipped to capacity.
+    """
+    # ponytail: day D calibrates on days up to D-2 (D-1 is incomplete at a D-1 origin); a
+    # same-day (intraday) origin would need the truth lag instead.
+    lo, hi = (preds.q10, preds.q90) if band else (preds.q50, preds.q50)
+    local = preds.index.tz_convert(tz)
+    day = pd.Series(local.tz_localize(None).normalize(), index=preds.index)
+    frame = pd.DataFrame(
+        {"day": day, "slot": local.hour * 4 + local.minute // 15, "lower": lo - preds.obs}
+    )
+    frame["upper"] = preds.obs - hi
+    complete = preds[["q10", "q50", "q90", "obs"]].notna().all(axis=1).groupby(day).all()
+    # Autumn DST repeats a local slot: the larger score, one per day and slot (as `calibrate`).
+    scores = frame[frame.day.map(complete)].groupby(["day", "slot"])[["lower", "upper"]].max()
+    bounds = []
+    for side in ("lower", "upper"):
+        table = scores[side].unstack("slot")
+        rows = {}
+        for d in day.unique():
+            past = np.sort(table.loc[: d - pd.Timedelta(days=2)].tail(window_days), axis=0)
+            n = (~np.isnan(past)).sum(axis=0)  # np.sort puts NaN last
+            k = np.array([rank(m, tail_probability) for m in n], dtype=int)
+            ok = (n >= min_days) & (k <= n)
+            if not len(past):
+                continue
+            pick = past[np.clip(k - 1, 0, len(past) - 1), np.arange(len(n))]
+            rows[d] = np.where(ok, pick, np.nan)
+        bounds.append(pd.DataFrame(rows, index=table.columns).T.stack().rename(side))
+    b = pd.concat(bounds, axis=1).reindex(pd.MultiIndex.from_arrays([day, frame.slot]))
+    out = preds.copy()
+    out["q10"] = (lo - b.lower.to_numpy()).fillna(preds.q10).clip(lower=0)
+    out["q90"] = (hi + b.upper.to_numpy()).fillna(preds.q90)
+    out["q10"] = out[["q10", "q50"]].min(axis=1)
+    out["q90"] = out[["q90", "q50"]].max(axis=1)
+    return out
+
+
+if __name__ == "__main__":
+    # python -m openpredico.models.conformal <config> <prediction dir> [band|point]: writes
+    # <config>_cqr (band) or <config>_cp (point) next to it, for evaluation.results.
+    import sys
+    from pathlib import Path
+
+    from openpredico.config import load_targets
+    from openpredico.evaluation.backtest import clip
+
+    config, root, mode = sys.argv[1], Path(sys.argv[2]), (sys.argv[3:] or ["band"])[0]
+    out = root / f"{config}_{'cqr' if mode == 'band' else 'cp'}"
+    out.mkdir(exist_ok=True)
+    for f in (root / config).glob("*.parquet"):
+        t = load_targets()[f.stem]
+        p = pd.read_parquet(f)
+        r = recalibrate(p, t["timezone"], band=mode == "band")
+        clip(r[["q10", "q50", "q90"]], t).assign(obs=r.obs).to_parquet(out / f.name)
