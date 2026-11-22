@@ -7,6 +7,7 @@ push the static Space. The page only draws: every score here uses evaluation/met
 """
 
 import argparse
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -15,6 +16,8 @@ import numpy as np
 import pandas as pd
 import requests
 from huggingface_hub import HfApi
+from huggingface_hub.hf_api import RepoFile
+from huggingface_hub.utils.sha import git_hash
 
 from openpredico.config import load_targets
 from openpredico.data import openmeteo
@@ -349,6 +352,42 @@ def live(out: Path, demo: bool) -> None:
     write(out, "live.json", data)
 
 
+SPACE = f"{ORG}/dashboard"
+UPLOAD = ["index.html", "app.js", "README.md", "data/**"]
+
+
+def unchanged(meta: dict) -> bool:
+    """True if the Space already serves every file we would upload, and the same meta.json
+    apart from `generated`: then an upload would only bump the build time."""
+    api = HfApi()
+    try:
+        old = json.loads(
+            Path(api.hf_hub_download(SPACE, "data/meta.json", repo_type="space")).read_text()
+        )
+    except Exception:  # first upload
+        return False
+    if {**old, "generated": None} != {**json.loads(json.dumps(meta)), "generated": None}:
+        return False
+    remote = {
+        f.path: f
+        for f in api.list_repo_tree(SPACE, repo_type="space", recursive=True)
+        if isinstance(f, RepoFile)
+    }
+    local = [*(HERE / n for n in UPLOAD[:3]), *(HERE / "data").rglob("*.json")]
+    for path in local:
+        rel, data = path.relative_to(HERE).as_posix(), path.read_bytes()
+        if rel == "data/meta.json":
+            continue
+        f = remote.get(rel)
+        if f is None or (
+            hashlib.sha256(data).hexdigest() != f.lfs.sha256
+            if f.lfs
+            else git_hash(data) != f.blob_id
+        ):
+            return False
+    return True
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--out", type=Path, default=HERE / "data")
@@ -369,13 +408,16 @@ def main() -> None:
         "units": UNITS,
         "short": SHORT,
     }
+    if a.upload and unchanged(meta):
+        print("dashboard unchanged apart from the build time: no Space commit")
+        return
     write(a.out, "meta.json", meta)
     if a.upload:
         HfApi().upload_folder(
-            repo_id=f"{ORG}/dashboard",
+            repo_id=SPACE,
             repo_type="space",
             folder_path=HERE,
-            allow_patterns=["index.html", "app.js", "README.md", "data/**"],
+            allow_patterns=UPLOAD,
             delete_patterns=["app.py", "requirements.txt"],  # the old stlite app
             commit_message=f"Dashboard data {meta['generated']}",
         )

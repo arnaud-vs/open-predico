@@ -3,6 +3,9 @@ name: dashboard
 # Rebuilds the public dashboard (HF Space) from the HF datasets every hour at :21, off the busy
 # minutes. Best effort: Modal's publish job also rebuilds it after each gate. Reads only public
 # data and writes the Space, so it needs HF_TOKEN (environment `production`), no Predico access.
+# Cheap when nothing changed: the HF download cache is kept between runs (keyed on the benchmark
+# dataset's commit, so backtest predictions are only re-downloaded after they change), and
+# build.py skips the Space commit when only the build time would change.
 on:
   schedule:
     - cron: "21 * * * *"
@@ -24,6 +27,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
       - run: uv sync
+      - name: Benchmark dataset revision
+        id: rev
+        run: |
+          sha=$(curl -sf https://huggingface.co/api/datasets/open-predico/benchmark | jq -r .sha)
+          echo "sha=${sha:-unknown}" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface/hub
+          key: hf-${{ steps.rev.outputs.sha }}
+          restore-keys: hf-
       - run: uv run python dashboard/build.py --upload
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
