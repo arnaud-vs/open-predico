@@ -68,7 +68,10 @@ def publish() -> None:
     try:
         publish.main()
     finally:  # the dashboard refreshes even if publishing failed (it shows what is there)
-        subprocess.run([sys.executable, "/dashboard/build.py", "--upload"], check=True)
+        # data only: the page (app.js, index.html) is this deploy's copy, often older than main;
+        # the GitHub dashboard workflow pushes the page from main
+        build = [sys.executable, "/dashboard/build.py", "--upload", "--data-only"]
+        subprocess.run(build, check=True)
 
 
 @app.function(cpu=1.0, memory=4096, timeout=1800)

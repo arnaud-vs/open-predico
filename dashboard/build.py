@@ -3,6 +3,7 @@ push the static Space. The page only draws: every score here uses evaluation/met
 
     python dashboard/build.py                 # writes dashboard/data/
     python dashboard/build.py --upload        # and pushes index.html, app.js, data/ to the Space
+    python dashboard/build.py --upload --data-only  # only data/ (Modal: its page copy is stale)
     python dashboard/build.py --demo-live     # local preview only: backtest days in the live format
 """
 
@@ -30,13 +31,17 @@ from openpredico.evaluation.metrics import daily_scores
 HERE = Path(__file__).parent
 PREFIX = "predictions/backtest/"
 BASELINE = "slot_climatology_28d"
-LIVE_CONFIG = "t0gamma_cov_ctx90"
 # Dashboard markets (app.js MARKETS) and the short name of each target inside the page.
 MARKETS = {
     "es-mfrr": {"spain_mfrr_energy": "energy", "spain_mfrr_price": "price"},
     "de-wind": {"germany_wind_50hertz_ca": "wind"},
     "de-solar": {"germany_solar_50hertz_ca": "solar"},
     "be-solar": {"belgium_solar_opendata_elia": "solar_be"},
+}
+CONFIG = "t0gamma_cov_ctx90"  # = live.submit.CONFIG (not imported: it loads the t0 model code)
+LIVE_CONFIG = {  # market -> backtest config of its live model (targets.toml live_config)
+    m: load_targets()[next(iter(shorts))].get("live_config", CONFIG)
+    for m, shorts in MARKETS.items()
 }
 SHORT = {target: short for m in MARKETS.values() for target, short in m.items()}
 UNITS = {SHORT[n]: t["unit"] for n, t in load_targets().items() if n in SHORT}  # shown
@@ -55,6 +60,12 @@ TYPES = {  # config name prefix -> model type; anything else is ML
     "entsoe": "TSO forecast",
 }
 STEP = pd.Timedelta("15min")
+
+
+def live_config(target: str) -> str:
+    return load_targets()[target].get("live_config", CONFIG)
+
+
 LIVE_COLUMNS = (
     *("q10", "q50", "q90", "s10", "s50", "s90", "obs", "b10", "b50", "b90"),
     *("t10", "t50", "t90"),  # the TSO's own forecast, where the target has one
@@ -338,7 +349,9 @@ def live_frames(demo: bool) -> tuple[dict[str, pd.DataFrame], pd.DataFrame | Non
     # Demo: the live config's last 21 backtest days, two of them without a Predico submission.
     frames, rows = {}, []
     for target, t in SHORT.items():
-        fc = download("benchmark", f"{PREFIX}{LIVE_CONFIG}/{target}.parquet").iloc[-21 * 96 :]
+        fc = download("benchmark", f"{PREFIX}{live_config(target)}/{target}.parquet").iloc[
+            -21 * 96 :
+        ]
         base = download("benchmark", f"{PREFIX}{BASELINE}/{target}.parquet").reindex(fc.index)
         fc[["b10", "b50", "b90"]] = base[["q10", "q50", "q90"]].to_numpy()
         day = fc.index.tz_convert("Europe/Madrid").strftime("%Y-%m-%d")
@@ -347,7 +360,7 @@ def live_frames(demo: bool) -> tuple[dict[str, pd.DataFrame], pd.DataFrame | Non
         registered = ~np.isin(day, sorted(set(day))[-3:-1])
         for q in ("10", "50", "90"):
             fc[f"s{q}"] = fc[f"q{q}"].where(registered)
-        fc["model"], fc["env"] = LIVE_CONFIG, "demo"
+        fc["model"], fc["env"] = live_config(target), "demo"
         fc.loc[day == sorted(set(day))[2], ["q10", "q50", "q90"]] = np.nan  # registered, no run
         frames[t] = fc
         cols = [c for g in load_targets()[target]["groups"] for c in load_groups()[g]]
@@ -355,7 +368,7 @@ def live_frames(demo: bool) -> tuple[dict[str, pd.DataFrame], pd.DataFrame | Non
             {
                 "target": target,
                 "run": fc.index[-1],
-                "model": LIVE_CONFIG,
+                "model": live_config(target),
                 "features": ",".join(c for c in cols if c != TARGET_COLUMNS[target]),
             }
         )
@@ -421,7 +434,7 @@ SPACE = f"{ORG}/dashboard"
 UPLOAD = ["index.html", "app.js", "README.md", "data/**"]
 
 
-def unchanged(meta: dict) -> bool:
+def unchanged(meta: dict, data_only: bool = False) -> bool:
     """True if the Space already serves every file we would upload, and the same meta.json
     apart from `generated`: then an upload would only bump the build time."""
     api = HfApi()
@@ -438,7 +451,8 @@ def unchanged(meta: dict) -> bool:
         for f in api.list_repo_tree(SPACE, repo_type="space", recursive=True)
         if isinstance(f, RepoFile)
     }
-    local = [*(HERE / n for n in UPLOAD[:3]), *(HERE / "data").rglob("*.json")]
+    page = [] if data_only else [HERE / n for n in UPLOAD[:3]]
+    local = [*page, *(HERE / "data").rglob("*.json")]
     for path in local:
         rel, data = path.relative_to(HERE).as_posix(), path.read_bytes()
         if rel == "data/meta.json":
@@ -457,6 +471,7 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--out", type=Path, default=HERE / "data")
     p.add_argument("--upload", action="store_true")
+    p.add_argument("--data-only", action="store_true")  # leave the Space's page files as they are
     p.add_argument("--demo-live", action="store_true")
     a = p.parse_args()
     if a.upload and a.demo_live:
@@ -474,7 +489,7 @@ def main() -> None:
         "units": UNITS,
         "short": SHORT,
     }
-    if a.upload and unchanged(meta):
+    if a.upload and unchanged(meta, a.data_only):
         print("dashboard unchanged apart from the build time: no Space commit")
         return
     write(a.out, "meta.json", meta)
@@ -483,7 +498,7 @@ def main() -> None:
             repo_id=SPACE,
             repo_type="space",
             folder_path=HERE,
-            allow_patterns=UPLOAD,
+            allow_patterns=["data/**"] if a.data_only else UPLOAD,
             delete_patterns=["app.py", "requirements.txt"],  # the old stlite app
             commit_message=f"Dashboard data {meta['generated']}",
         )

@@ -211,6 +211,9 @@ function parseConfig(name, wx = []) {
     else if ((x = p.match(/^ctx(\d+)$/) ?? p.match(/^(\d+)d$/))) r.ctx = +x[1];
     else if (p === "ecmwfd2") (explicit ??= []).push("IFS", "ICON-D2");
     else if (WX[p]) (explicit ??= []).push(WX[p]);
+    // WeatherNext 3 (BigQuery, not in weather.json): `wn3` = the market's models + WN3
+    else if (p === "wn3") (explicit ??= wx.map(wxShort)).push("WN3");
+    else if (p === "wn3only") explicit = ["WN3"];
     // the noX ablations predate KNMI and AIFS: IFS + ICON-D2 minus one
     else if (p === "noecmwf") explicit = ["ICON-D2"];
     else if (p === "noicond2") explicit = ["IFS"];
@@ -462,9 +465,9 @@ async function renderBacktest(root) {
   const type = Object.fromEntries(meta.configs.map(c => [c.name, c.type]));
   const info = Object.fromEntries(CONFIGS.map(c => [c, parseConfig(c, wx)]));
   const label = c => cfgLabel(c, wx);
-  const lb = leaderboard(days, meta.baseline), t0 = targets[0];
-  const top = lb.filter(r => r.config !== meta.live_config && r.config !== meta.baseline).slice(0, 2).map(r => r.config);
-  let sel = [meta.live_config, meta.baseline, ...top].filter(c => CONFIGS.includes(c)), types = new Set(), absolute = false, sortK = "rank", sortDir = 1;
+  const lb = leaderboard(days, meta.baseline), t0 = targets[0], live = meta.live_config[m.id];
+  const top = lb.filter(r => r.config !== live && r.config !== meta.baseline).slice(0, 2).map(r => r.config);
+  let sel = [live, meta.baseline, ...top].filter(c => CONFIGS.includes(c)), types = new Set(), absolute = false, sortK = "rank", sortDir = 1;
 
   root.innerHTML = `
     <div class="head"><div><h1>Backtest</h1><p class="lede">Test year 1 Nov 2025 – 31 Oct 2026. Each forecast is made at 14:00 ${m.city} on D-1 from data published before then, and scored per local day as Predico does. <b>Lower is better.</b> ${m.missingTruth}</p></div></div>
@@ -501,7 +504,7 @@ async function renderBacktest(root) {
     const notes = rows.some(r => info[r.config].notes.length), weather = rows.some(r => info[r.config].weather?.length);
     const COLS = [
       ["rank", "Rank", r => r.rank, r => (r.rank <= 3 ? `<span class="medal" title="${["Gold", "Silver", "Bronze"][r.rank - 1]}">${r.rank}</span>` : r.rank ?? "–"), true],
-      ["model", "Model", r => info[r.config].model, r => `<span title="${esc(r.config)}">${esc(info[r.config].model)}</span>${r.config === meta.live_config ? ' <span class="pill">live</span>' : ""}`],
+      ["model", "Model", r => info[r.config].model, r => `<span title="${esc(r.config)}">${esc(info[r.config].model)}</span>${r.config === live ? ' <span class="pill">live</span>' : ""}`],
       ["cov", "Covariates", r => yesNo(info[r.config].cov), r => yesNo(info[r.config].cov)],
       ["ctx", "Context", r => info[r.config].ctx, r => (info[r.config].ctx == null ? "–" : `${info[r.config].ctx} d`), true],
       ...(weather ? [["wx", "Weather", r => info[r.config].weather?.join(", ") ?? "", r => esc(info[r.config].weather?.join(", ") || "–")]] : []),
@@ -519,7 +522,7 @@ async function renderBacktest(root) {
     });
     const cls = k => (k === "score" || k.endsWith("rel") ? "rel" : "");
     lbEl.innerHTML = `<table><thead><tr>${COLS.map(([k, h, , , num]) => `<th class="${num ? "n" : ""}" data-k="${k}" style="cursor:pointer" aria-sort="${k === sortK ? (sortDir > 0 ? "ascending" : "descending") : "none"}">${h}${k === sortK ? (sortDir > 0 ? " ↑" : " ↓") : ""}</th>`).join("")}</tr></thead><tbody>${sorted.map(r =>
-      `<tr class="${r.config === meta.live_config ? "live" : ""} ${r.rank <= 3 ? `m${r.rank}` : ""}">${COLS.map(([k, , v, html, num]) => `<td class="${num ? "n" : ""} ${cls(k) ? relClass(v(r)) : ["cov", "ctx", "type", "wx", "notes"].includes(k) ? "muted" : ""}">${html(r)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+      `<tr class="${r.config === live ? "live" : ""} ${r.rank <= 3 ? `m${r.rank}` : ""}">${COLS.map(([k, , v, html, num]) => `<td class="${num ? "n" : ""} ${cls(k) ? relClass(v(r)) : ["cov", "ctx", "type", "wx", "notes"].includes(k) ? "muted" : ""}">${html(r)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
   }
   lbEl.addEventListener("click", e => {
     const th = e.target.closest("th[data-k]"); if (!th) return;
@@ -544,7 +547,7 @@ async function renderBacktest(root) {
     b.setAttribute("aria-pressed", String(sel.includes(b.dataset.v)));
     redrawSel();
   });
-  const cfgSeries = c => { const st = configStyle(c); return line(label(c), st.color, { dash: st.dash, width: c === meta.live_config ? 2.5 : 1.75 }); };
+  const cfgSeries = c => { const st = configStyle(c); return line(label(c), st.color, { dash: st.dash, width: c === live ? 2.5 : 1.75 }); };
 
   // By month
   let moT = t0, moM = "rmse";
