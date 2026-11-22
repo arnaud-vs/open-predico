@@ -12,6 +12,7 @@ from collections.abc import Callable
 
 import pandas as pd
 from huggingface_hub import HfApi
+from huggingface_hub.errors import RemoteEntryNotFoundError
 
 from openpredico.config import live_targets
 from openpredico.data import hf
@@ -65,7 +66,9 @@ def archived(g: str, start: pd.Timestamp, end: pd.Timestamp, tz: str, save: bool
     set). Seeded from the backtest backfill (`load_benchmark`) if there is no archive yet."""
     try:
         old = hf.download("benchmark", ARCHIVE.format(g))
-    except Exception:  # no archive yet (or HF down): seed from the backfill, else fetch it all
+    except RemoteEntryNotFoundError:  # no archive yet: seed from the backfill, else fetch it all
+        # Only a missing file: any other error (HF down) raises, so a reseed never overwrites
+        # the archive. Not LocalEntryNotFoundError either: that one means HF was unreachable.
         old = load_benchmark({g}).get(g, pd.DataFrame())
     complete = old.dropna().index
     since = start if complete.empty else max(start, complete.max().floor("D") - pd.Timedelta("1D"))

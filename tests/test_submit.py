@@ -90,3 +90,19 @@ def test_archived_fetches_only_new_days_and_keeps_old_ones(monkeypatch):
         out.loc["2026-11-18":, "ghi_be"] == 2
     ).all()
     assert saved["df"].index[0] == idx[0]  # old days kept
+
+
+def test_archived_raises_on_hf_errors_other_than_a_missing_file(monkeypatch):
+    import pytest
+    from huggingface_hub.errors import LocalEntryNotFoundError
+
+    from openpredico.live import submit
+
+    def down(repo, path):
+        raise LocalEntryNotFoundError("HF unreachable")  # outage, not a missing archive
+
+    monkeypatch.setattr(submit.hf, "download", down)
+    monkeypatch.setattr(submit.hf, "upload", lambda *a: pytest.fail("archive overwritten"))
+    start, end = pd.Timestamp("2026-08-20", tz="UTC"), pd.Timestamp("2026-11-22", tz="UTC")
+    with pytest.raises(LocalEntryNotFoundError):
+        submit.archived("weather_be", start, end, "Europe/Brussels", save=True)
