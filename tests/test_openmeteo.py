@@ -33,3 +33,22 @@ def test_run_keeps_its_local_day_and_shifts_radiation_to_the_hour_it_ends(monkey
     assert len(out) == 24
     assert out.wind_speed_100m.iloc[0] == 22  # instant value at 22:00
     assert out.shortwave_radiation.iloc[0] == 23  # 22:00-23:00 mean, labelled 23:00 by the API
+
+
+def test_errors_never_quote_the_api_key(monkeypatch):
+    import pytest
+    import requests
+
+    from openpredico.data import openmeteo
+
+    monkeypatch.setattr(openmeteo, "API_KEY", "SECRETKEY")
+
+    def get(url, params, timeout):
+        raise requests.ConnectionError(
+            f"Max retries exceeded with url: /v1?apikey={params['apikey']}"
+        )
+
+    monkeypatch.setattr(openmeteo._session, "get", get)
+    with pytest.raises(requests.ConnectionError) as e:
+        openmeteo._get([(50, 4)], "ecmwf_ifs", openmeteo.pd.Timestamp("2026-11-20"), 3, "be")
+    assert "SECRETKEY" not in str(e.value)

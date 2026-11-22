@@ -190,6 +190,7 @@ def validate(fc: pd.DataFrame, now: pd.Timestamp) -> None:
 
 def main(dry_run: bool, only: list[str] | None = None) -> None:
     """Submit every target, or only the targets named in `only`."""
+    print(f"openmeteo: {'commercial plan' if openmeteo.API_KEY else 'free tier'}")  # never the key
     now = pd.Timestamp.now(tz="UTC")
     targets = {n: t for n, t in live_targets().items() if not only or n in only}
     if unknown := set(only or ()) - targets.keys():

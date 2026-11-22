@@ -11,13 +11,18 @@ One request per run covers every point and variable. No key needed; the free tie
 non-commercial (DATA_SOURCES.md).
 """
 
+import logging
+import os
 import time
 
 import pandas as pd
 import requests
 from requests.adapters import HTTPAdapter, Retry
 
-BASE_URL = "https://single-runs-api.open-meteo.com/v1/forecast"
+# Commercial plan (Predico is commercial use): key in env, else the free tier (non-commercial).
+API_KEY = os.environ.get("OPENMETEO_API_KEY")
+BASE_URL = f"https://{'customer-' if API_KEY else ''}single-runs-api.open-meteo.com/v1/forecast"
+logging.getLogger("urllib3").setLevel(logging.ERROR)  # retry warnings print the URL (key)
 MODEL = "ecmwf_ifs"
 TZ = "Europe/Berlin"  # target days are local days
 # ponytail: a handful of hand-picked points across the 50Hertz area, plain mean per area.
@@ -165,23 +170,38 @@ def _run(day: pd.Timestamp, areas: list[str]) -> dict[str, pd.DataFrame]:
 def _get(points, model: str, run: pd.Timestamp, forecast_days: int, label: str):
     """Hourly VARIABLES per point of one run (UTC; radiation shifted to the hour it starts)."""
     started = time.time()
-    resp = _session.get(
-        BASE_URL,
-        params={
-            "latitude": ",".join(str(p[0]) for p in points),
-            "longitude": ",".join(str(p[1]) for p in points),
-            "hourly": ",".join(VARIABLES),
-            "models": model,
-            "run": f"{run:%Y-%m-%dT%H:%M}",
-            "forecast_days": forecast_days,  # from 00 UTC of the run's day
-            "timezone": "GMT",
-            "wind_speed_unit": "ms",
-        },
-        timeout=60,
-    )
-    if (took := time.time() - started) > 20:  # retries are silent otherwise
-        print(f"openmeteo {label}: {took:.0f} s, HTTP {resp.status_code}")
-    resp.raise_for_status()
+    try:
+        resp = _session.get(
+            BASE_URL,
+            params={
+                "latitude": ",".join(str(p[0]) for p in points),
+                "longitude": ",".join(str(p[1]) for p in points),
+                "hourly": ",".join(VARIABLES),
+                "models": model,
+                "run": f"{run:%Y-%m-%dT%H:%M}",
+                "forecast_days": forecast_days,  # from 00 UTC of the run's day
+                "timezone": "GMT",
+                "wind_speed_unit": "ms",
+            }
+            | ({"apikey": API_KEY} if API_KEY else {}),
+            timeout=60,
+        )
+        if (took := time.time() - started) > 20:  # retries are silent otherwise
+            print(f"openmeteo {label}: {took:.0f} s, HTTP {resp.status_code}")
+        resp.raise_for_status()
+    except requests.RequestException as e:  # its message quotes the URL, key included
+        raise redact(e) from None
+    return _frames(resp)
+
+
+def redact(e: requests.RequestException) -> requests.RequestException:
+    """The error with the API key cut from its message (it quotes the URL)."""
+    if API_KEY:
+        e.args = tuple(str(a).replace(API_KEY, "***") for a in e.args)
+    return e
+
+
+def _frames(resp: requests.Response) -> list[pd.DataFrame]:
     locations = resp.json()
     frames = []
     for loc in locations if isinstance(locations, list) else [locations]:
