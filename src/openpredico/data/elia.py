@@ -22,8 +22,11 @@ DATASETS = [
 SWITCH = pd.Timestamp("2026-10-25 23:00", tz="UTC")  # ods032 ends, ods209/ods210 begin
 
 
-def fetch(key: str, start, end) -> pd.Series:
-    """One field on the 15-min UTC grid [start, end); missing quarter-hours NaN."""
+def fetch(key: str, start, end, cache: dict | None = None) -> pd.Series:
+    """One field on the 15-min UTC grid [start, end); missing quarter-hours NaN.
+
+    `cache` (one group build): each (dataset, field, window) is fetched once.
+    """
     family, field = key.split(".")
     if family != "solar":
         raise ValueError(f"unknown Elia key {key!r}")
@@ -31,11 +34,15 @@ def fetch(key: str, start, end) -> pd.Series:
     start, end = (t.tz_localize("UTC") if t.tz is None else t for t in (start, end))
     grid = pd.date_range(start, end, freq="15min", inclusive="left", name="time")
     out = pd.Series(float("nan"), index=grid)
+    cache = {} if cache is None else cache
     for dataset, where, rename in DATASETS:
         old = dataset == "ods032"
         lo, hi = (start, min(end, SWITCH)) if old else (max(start, SWITCH), end)
         if lo < hi:
-            out = out.combine_first(_get(dataset, rename.get(field, field), where, lo, hi))
+            k = ("elia", dataset, rename.get(field, field), lo, hi)
+            if k not in cache:
+                cache[k] = _get(dataset, k[2], where, lo, hi)
+            out = out.combine_first(cache[k])
     return out.reindex(grid).rename(None)
 
 

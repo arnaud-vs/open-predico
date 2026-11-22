@@ -1,8 +1,9 @@
-"""Daily live run: t0-gamma D+1 (the target's groups as covariates, 90-day context) plus
-slot-climatology D+2..D+10 for every target -> HF live-private -> Predico.
+"""Live run: t0-gamma D+1 (the target's groups as covariates, 90-day context; intraday targets
+from now) plus slot-climatology D+2..D+10 for every target -> Predico -> HF live-private.
 
 Usage: python -m openpredico.live.submit [--dry-run] [--target a,b] [--check]
-       --dry-run skips HF and Predico; --target limits the run to these targets.
+       --dry-run skips HF and Predico; --target limits the run to these targets;
+       --check is one scheduler tick (`check_and_retry`).
 Needs the t0 extra: `uv sync --extra t0`.
 """
 
@@ -12,11 +13,12 @@ from collections.abc import Callable
 
 import pandas as pd
 from huggingface_hub import HfApi
+from huggingface_hub.errors import RemoteEntryNotFoundError
 
 from openpredico.config import live_targets
 from openpredico.data import hf
 from openpredico.data.groups import build, load_groups
-from openpredico.evaluation.backtest import PUBLICATION_LAG, clip
+from openpredico.evaluation.backtest import clip, cut_past
 from openpredico.evaluation.experiment import CATEGORICAL, features, load_benchmark
 from openpredico.live.predico import Predico
 from openpredico.live.wind_pair_consumer import needs_retry as pair_needs_retry
@@ -28,7 +30,14 @@ MODEL = "theforecastingcompany/t0-gamma"  # best Apache-2.0 model in the backtes
 CONFIG, FALLBACK = "t0gamma_cov_ctx90", "slot_climatology_28d"  # backtest config names
 CONTEXT_DAYS = 90
 HORIZON_DAYS = 10
-ARCHIVE = "archive/{}.parquet"  # weather archive per group, benchmark repo
+ARCHIVE = "archive/{}.parquet"  # per non-calendar group, in the (public) benchmark repo
+# Days refetched before an archive's frontier each run, per source; refetched values win.
+# ESIOS overwrites some forecasts after publication (PLAN: Benchmark), later revisions unchecked;
+# ENTSO-E revises A75 over 35 days (PLAN: 50Hertz); Elia's daily ods209 replaces the
+# near-real-time ods210 a day later; an Open-Meteo run never changes. The window costs one
+# request per series whatever its length (ESIOS chunks a month, ENTSO-E a year, Elia one export).
+REVISE = {"openmeteo": 0, "esios": 7, "elia": 7, "entsoe": 35}
+STEP = pd.Timedelta("15min")
 
 
 def build_frames(
@@ -40,49 +49,80 @@ def build_frames(
 ) -> dict[str, pd.DataFrame]:
     """`groups` from CONTEXT_DAYS before `first` (default now) through the end of now's D+1.
 
-    Weather groups come from their archive (`archived`); `save` writes the extended archive.
+    Every group but calendar ones (computed) comes from its archive (`archived`); `save` writes
+    the extended archives.
     """
     local = now.tz_convert(tz)
     since = (first if first is not None else now).tz_convert(tz)
     start = (since - pd.Timedelta(days=CONTEXT_DAYS + 1)).normalize().tz_convert("UTC")
     end = (local.normalize() + pd.DateOffset(days=2)).tz_convert("UTC")
-    # ponytail: ~30 ESIOS ids x 4 monthly chunks at 1 req/s, refetched daily; cache on HF if slow
     out, groups_toml = {}, load_groups()
     for g in groups:
         t0_ = time.time()
-        if all(c["source"].startswith("openmeteo:") for c in groups_toml[g].values()):
-            out[g] = archived(g, start, end, tz, save)
-        else:
+        if all(c["source"].startswith("calendar:") for c in groups_toml[g].values()):
             out[g] = build(g, *(t.tz_localize(None).isoformat() for t in (start, end)), tz, True)
+        else:
+            out[g] = archived(g, start, end, tz, save)
         print(f"built {g} in {time.time() - t0_:.0f} s")  # timing only, no values
     return out
 
 
 def archived(g: str, start: pd.Timestamp, end: pd.Timestamp, tz: str, save: bool) -> pd.DataFrame:
-    """Weather group `g` on [start, end) from its archive on HF (`benchmark/archive/<g>.parquet`),
-    extended with the days from its last complete day on: an archived run never changes, so each
-    run fetches ~3 days instead of the whole context. Old days are kept (the growing backtest
-    set). Seeded from the backtest backfill (`load_benchmark`) if there is no archive yet."""
+    """Group `g` on [start, end) from its archive on HF (`benchmark/archive/<g>.parquet`),
+    extended each run: only the days from its `frontier` on, minus its sources' REVISE window,
+    are fetched, and fetched values win. Old days are kept (the growing backtest set). Seeded
+    from the backtest backfill (`load_benchmark`) if there is no archive yet. `save` writes the
+    archive back only when its frontier reached a later day: about one commit a day per group,
+    even for hourly runs."""
+    columns = load_groups()[g]
     try:
         old = hf.download("benchmark", ARCHIVE.format(g))
-    except Exception:  # no archive yet (or HF down): seed from the backfill, else fetch it all
+    except RemoteEntryNotFoundError:  # no archive yet: seed from the backfill, else fetch it all
+        # Only a missing file: any other error (HF down) raises, so a reseed never overwrites
+        # the archive. Not LocalEntryNotFoundError either: that one means HF was unreachable.
         old = load_benchmark({g}).get(g, pd.DataFrame())
-    complete = old.dropna().index
-    since = start if complete.empty else max(start, complete.max().floor("D") - pd.Timedelta("1D"))
-    new = build(g, *(t.tz_localize(None).isoformat() for t in (since, end)), tz, lenient=True)
-    merged = new.combine_first(old).sort_index()
-    if save and not new.empty:
-        hf.upload(
-            merged, "benchmark", ARCHIVE.format(g), f"Weather archive {g}: through {end:%Y-%m-%d}"
-        )
+    old = old[[c for c in columns if c in old]]  # columns dropped from groups.toml stay out
+    was = frontier(old, columns, tz)
+    revise = pd.Timedelta(days=max(REVISE[c["source"].split(":")[0]] for c in columns.values()))
+    since = start if was is None or old.index.min() > start else max(start, was - revise)
+    new = pd.DataFrame()
+    if since < end:
+        new = build(g, *(t.tz_localize(None).isoformat() for t in (since, end)), tz, lenient=True)
+    merged = new if old.empty else old if new.empty else new.combine_first(old).sort_index()
+    merged = merged[[c for c in columns if c in merged]]
+    reached = frontier(merged, columns, tz)
+    if save and reached is not None and (was is None or reached > was):
+        msg = f"Archive {g}: through {reached:%Y-%m-%d}"
+        hf.upload(merged, "benchmark", ARCHIVE.format(g), msg)
     grid = pd.date_range(start, end, freq="15min", inclusive="left", name="time")
     return merged.reindex(grid)
+
+
+def frontier(df: pd.DataFrame, columns: dict, tz: str) -> pd.Timestamp | None:
+    """Start (UTC) of the first local day `df` doesn't fully hold; None if it holds nothing.
+
+    The earlier of its last row with any past value and its last row with any future value, so
+    sparse columns (mFRR direct activations) don't hold it back. Columns with a `fill` are left
+    out: the fill runs past the published data.
+    """
+    ends = []
+    for availability in ("past", "future"):
+        cols = [c for c, d in columns.items() if d["availability"] == availability]
+        if cols := [c for c in cols if c in df and "fill" not in columns[c]]:
+            ends.append(df[cols].dropna(how="all").index.max())
+    if not ends or any(pd.isna(e) for e in ends):
+        return None
+    return (min(ends) + STEP).tz_convert(tz).normalize().tz_convert("UTC")
 
 
 def forecast(
     target: str, frames: dict[str, pd.DataFrame], predict: Callable, now: pd.Timestamp
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """(forecast D+1..D+10 within 240 h, exact model inputs). Same cut as the backtest."""
+    """(forecast D+1..D+10 within 240 h, exact model inputs). Same cut as the backtest.
+
+    `intraday` targets (hourly challenges) are forecast from now: t0 covers the rest of today
+    and D+1, climatology the days after.
+    """
     t = live_targets()[target]
     tz = t["timezone"]
     # ponytail: the >90%-missing column drop is decided on the live window, not the backtest's
@@ -91,15 +131,26 @@ def forecast(
         now.tz_convert(tz).normalize() + pd.Timedelta(days=1), periods=HORIZON_DAYS, tz=tz
     )
     stop = (days[0] + pd.DateOffset(days=1)).tz_convert("UTC")
-    past = history[history.index < now - PUBLICATION_LAG]
+    past = cut_past(history, now)
     future = history.loc[history.index < stop, future_cols]
-    late = [c for c in future_cols if future.loc[future.index >= days[0], c].isna().any()]
+    # Known-future columns are needed on D+1; intraday runs need them on the rest of today, and
+    # on D+1 only in its session hour (its gate counts): earlier, D+1 weather isn't out yet (the
+    # D-1 run of D+1 lands ~07 UTC) and t0 gets those gaps as NaN (it masks them).
+    # ponytail: the backtest never saw NaN known-future inputs; later runs replace those steps.
+    intraday = t.get("intraday", False)
+    lo, hi = (now, stop if d1_session(t, now) else days[0]) if intraday else (days[0], stop)
+    needed = (future.index >= lo) & (future.index < hi)
+    late = [c for c in future_cols if future.loc[needed, c].isna().any()]
     if late:  # left out rather than filled: TSFMs take any covariate set
-        print(f"{target}: left out, known-future columns with gaps on D+1: {late}")  # names
+        print(f"{target}: left out, known-future columns with gaps: {late}")  # names
         future_cols = [c for c in future_cols if c not in late]
         future, past = future[future_cols], past.drop(columns=late)
     past = past.drop(columns=future_cols)
-    d1 = predict(past, future, days[:1])
+    if intraday:
+        d1 = predict(past, future, days[:1], start=now)
+        d1 = d1[d1.index > now]
+    else:
+        d1 = predict(past, future, days[:1])
     rest = slot_climatology(past.iloc[:, 0], days[1:], tz=tz)  # D+2..D+10: unpaid fallback
     fc = clip(pd.concat([d1.assign(model=CONFIG), rest.assign(model=FALLBACK)]), t)
     # Predico accepts at most 240 h ahead, so the tail of D+10 is cut
@@ -144,8 +195,11 @@ def main(dry_run: bool, only: list[str] | None = None) -> None:
         print(f"{name}: submitted")
         env = "playground" if "playground" in client.api else "production"
         run = f"{name}/{now:%Y-%m-%dT%H%MZ}"
-        hf.upload(fc.assign(env=env), "live-private", f"forecasts/{run}.parquet", f"Forecast {run}")
-        hf.upload(inputs, "live-private", f"inputs/{run}.parquet", f"Inputs {run}")
+        # intraday runs outside the D+1 session under intraday/: publish reads forecasts/ only
+        where = "intraday/" if target.get("intraday") and not d1_session(target, now) else ""
+        files = {f"{where}forecasts/{run}.parquet": fc.assign(env=env)}
+        files[f"{where}inputs/{run}.parquet"] = inputs
+        hf.upload_many(files, "live-private", f"Run {run}")  # one commit
     if client:
         print("coverage:", client.coverage())
 
@@ -177,70 +231,76 @@ def hindcast(first: str, last: str, only: list[str]) -> None:
             fc, inputs = forecast(name, built[key], predict, now)
             validate(fc, now)
             run = f"{name}/{now:%Y-%m-%dT%H%MZ}"
-            hf.upload(fc.assign(env="hindcast"), "live-private", f"forecasts/{run}.parquet", run)
-            hf.upload(inputs, "live-private", f"inputs/{run}.parquet", f"Inputs {run}")
+            files = {f"forecasts/{run}.parquet": fc.assign(env="hindcast")}
+            files[f"inputs/{run}.parquet"] = inputs
+            hf.upload_many(files, "live-private", f"Hindcast {run}")
             print(f"{run}: hindcast saved")  # no values
 
 
+def d1_session(t: dict, now: pd.Timestamp) -> bool:
+    """Whether target `t`'s D+1 session is open now: the hour before its gate, local time."""
+    local = now.tz_convert(t["timezone"])
+    gate = pd.Timestamp(f"{local:%Y-%m-%d} {t['gate']}").tz_localize(t["timezone"])
+    return gate - pd.Timedelta("1h") <= local < gate
+
+
 def in_session(now: pd.Timestamp) -> list[str]:
-    """Targets whose D+1 session is open now: the hour before their gate, local time."""
-    out = []
-    for name, t in live_targets().items():
-        local = now.tz_convert(t["timezone"])
-        gate = pd.Timestamp(f"{local:%Y-%m-%d} {t['gate']}").tz_localize(t["timezone"])
-        if gate - pd.Timedelta("1h") <= local < gate:
-            out.append(name)
-    return out
+    """Targets to forecast now: those in their D+1 session, and `intraday` ones always (Predico
+    opens one of their challenges every hour, gate at the next full hour)."""
+    return [n for n, t in live_targets().items() if t.get("intraday") or d1_session(t, now)]
 
 
 def not_ready(client: Predico, now: pd.Timestamp) -> list[str]:
-    """Our targets with an open D+1 challenge that our forecasts don't fully cover yet.
-
-    Challenges starting before the target's next local midnight are intraday (Belgium, hourly):
-    our forecast starts at D+1, so they are never covered and not counted.
-    """
+    """Our targets with an open challenge that our forecasts don't fully cover yet."""
     cov = {c["challenge_id"]: c for c in client.coverage()["data"]["coverage"]}
     out = []
     for t in live_targets().values():
-        tomorrow = now.tz_convert(t["timezone"]).normalize() + pd.DateOffset(days=1)
         for c in client.open_challenges(t["predico_resource"]):
-            row = cov.get(c["id"], {})
-            if row.get("start") and pd.Timestamp(row["start"]) < tomorrow:
-                continue  # ponytail: intraday not forecast; add a from-now run to cover it
-            if not row.get("ready"):
+            if not cov.get(c["id"], {}).get("ready"):
                 out.append(c["resource_name"])
     return out
 
 
 def not_run(now: pd.Timestamp, files: list[str]) -> list[str]:
-    """Targets in session without a live run archived today (`files`: live-private paths).
+    """Targets in session without a live run archived (`files`: live-private paths) today, or
+    this hour for `intraday` targets.
 
     Predico's coverage can't tell: yesterday's climatology D+2 already covers today's challenge.
     """
-    return [
-        n
-        for n in in_session(now)
-        if not any(f.startswith(f"forecasts/{n}/{now:%Y-%m-%d}T") for f in files)
-    ]
+    targets, out = live_targets(), []
+    for n in in_session(now):
+        stamp = f"{now:%Y-%m-%dT%H}" if targets[n].get("intraday") else f"{now:%Y-%m-%d}T"
+        runs = (f"forecasts/{n}/{stamp}", f"intraday/forecasts/{n}/{stamp}")
+        if not any(f.startswith(runs) for f in files):
+            out.append(n)
+    return out
 
 
 def missing(client: Predico, now: pd.Timestamp) -> list[str]:
-    """Targets to resubmit: not covered on Predico, or no t0 run of ours today."""
+    """Targets in session to (re)submit: not covered on Predico, or without a run (`not_run`).
+
+    Only targets in session: a challenge open hours before its gate is never forecast early.
+    """
     by_resource = {t["predico_resource"]: n for n, t in live_targets().items()}
     files = HfApi().list_repo_files(f"{hf.ORG}/live-private", repo_type="dataset")
-    pending = {by_resource[r] for r in not_ready(client, now)} | set(not_run(now, files))
+    uncovered = {by_resource[r] for r in not_ready(client, now)} & set(in_session(now))
+    pending = uncovered | set(not_run(now, files))
     if pair_needs_retry(now, files):
         pending.add("germany_wind_50hertz_ca")
     return sorted(pending)
 
 
 def check_and_retry() -> None:
-    """Run in each open session before the gate: resubmit targets that `missing` lists."""
+    """One scheduler tick (live/modal_app.py, every 15 min): submit the targets that `missing`
+    lists, so a session's first tick submits and later ones retry what failed."""
     now = pd.Timestamp.now(tz="UTC")
+    if not in_session(now):
+        print("no session of ours open")  # the cheap path: no Predico login, no HF call
+        return
     todo = missing(Predico(), now)
     print(f"missing: {todo}")
     if not todo:
-        return  # done, or no session of ours open right now
+        return  # every target in session has its run and is covered
     main(dry_run=False, only=todo)
     if todo := missing(Predico(), pd.Timestamp.now(tz="UTC")):
         sys.exit(f"still missing after resubmit: {todo}")

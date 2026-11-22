@@ -56,22 +56,48 @@ def test_forecast_drops_a_weather_model_missing_on_d1_or_absent():
         "weather_be_knmi": knmi,
     }
     seen = {}
-
-    def predict(past, future, days):
-        seen.update(past=list(past.columns), future=list(future.columns))
-        grid = pd.date_range(days[0], periods=96, freq="15min").tz_convert("UTC")
-        return pd.DataFrame({"q10": 1.0, "q50": 2.0, "q90": 3.0}, index=grid)
-
-    fc, _ = forecast("belgium_solar_opendata_elia", frames, predict, now)
+    fc, _ = forecast("belgium_solar_opendata_elia", frames, _intraday_predict(seen), now)
     validate(fc, now)
-    assert seen == {"past": ["solar_be"], "future": ["ghi_be"]}
+    assert seen["past"] == ["solar_be"] and seen["future"] == ["ghi_be"]  # D+1 session hour
+
+
+def _intraday_predict(seen):
+    def predict(past, future, days, start):  # t0: from the end of past through the end of D+1
+        seen.update(past=list(past.columns), future=list(future.columns), past_end=past.index[-1])
+        stop = (days[0] + pd.Timedelta("1D")).tz_convert("UTC")
+        grid = pd.date_range(past.index[-1], stop, freq="15min")[1:-1]
+        out = pd.DataFrame({"q10": 1.0, "q50": 2.0, "q90": 3.0}, index=grid)
+        return out[out.index >= start]
+
+    return predict
+
+
+def test_intraday_forecast_starts_now_and_keeps_weather_missing_only_on_d1():
+    now = pd.Timestamp("2026-11-15 00:20", tz="UTC")  # Belgium 01:20: D+1 runs not out yet
+    idx = pd.date_range("2026-08-01", "2026-11-18", freq="15min", tz="UTC", inclusive="left")
+    weather = pd.DataFrame({"ghi_be": 1.0, "ghi_be_knmi": 1.0}, index=idx)
+    weather.loc[weather.index >= "2026-11-15 23:00"] = None  # D+1 (16 Nov) runs missing
+    weather.loc["2026-11-15 12:00", "ghi_be_knmi"] = None  # KNMI also missing a step today
+    frames = {
+        "target_elia": pd.DataFrame({"solar_be": 5.0}, index=idx),
+        "weather_be": weather[["ghi_be"]],
+        "weather_be_knmi": weather[["ghi_be_knmi"]],
+    }
+    seen = {}
+    fc, _ = forecast("belgium_solar_opendata_elia", frames, _intraday_predict(seen), now)
+    validate(fc, now)
+    assert seen["future"] == ["ghi_be"]  # kept with NaN on D+1; KNMI left out: gap today
+    assert seen["past_end"] == pd.Timestamp("2026-11-14 23:45", tz="UTC")  # 30 min Elia lag
+    assert fc.index[0] == pd.Timestamp("2026-11-15 00:30", tz="UTC")  # from now on
+    assert (fc.loc[:"2026-11-16 22:45", "model"] == "t0gamma_cov_ctx90").all()
 
 
 def test_archived_fetches_only_new_days_and_keeps_old_ones(monkeypatch):
     from openpredico.live import submit
 
-    idx = pd.date_range("2026-01-01", "2026-11-20", freq="15min", tz="UTC", inclusive="left")
-    old = pd.DataFrame({"ghi_be": 1.0}, index=idx)
+    tz = "Europe/Brussels"
+    idx = pd.date_range("2026-01-01", "2026-11-20", freq="15min", tz=tz, inclusive="left")
+    old = pd.DataFrame({"ghi_be": 1.0}, index=idx.tz_convert("UTC"))
     calls, saved = [], {}
 
     def build(g, start, end, tz, lenient):
@@ -83,10 +109,58 @@ def test_archived_fetches_only_new_days_and_keeps_old_ones(monkeypatch):
     monkeypatch.setattr(submit.hf, "upload", lambda df, *a: saved.update(df=df))
     monkeypatch.setattr(submit, "build", build)
     start, end = pd.Timestamp("2026-08-20", tz="UTC"), pd.Timestamp("2026-11-22", tz="UTC")
-    out = submit.archived("weather_be", start, end, "Europe/Brussels", save=True)
-    assert calls == ["2026-11-18T00:00:00"]  # from the day before the last complete day
+    out = submit.archived("weather_be", start, end, tz, save=True)
+    assert calls == ["2026-11-19T23:00:00"]  # first local day not archived; a run never changes
     assert out.index[0] == start and out.index[-1] < end and out.notna().all().all()
-    assert (out.loc[:"2026-11-17", "ghi_be"] == 1).all() and (
-        out.loc["2026-11-18":, "ghi_be"] == 2
-    ).all()
+    assert (out.loc[:"2026-11-19 22:45", "ghi_be"] == 1).all()
+    assert (out.loc["2026-11-19 23:00":, "ghi_be"] == 2).all()
     assert saved["df"].index[0] == idx[0]  # old days kept
+
+
+def test_archived_refetches_the_revision_window_and_saves_once_a_day(monkeypatch):
+    from openpredico.live import submit
+
+    tz = "Europe/Brussels"
+    idx = pd.date_range("2026-08-01", "2026-11-21 10:00", freq="15min", tz="UTC", inclusive="left")
+    archive = {"df": pd.DataFrame({"solar_be": 1.0}, index=idx)}
+    calls, saves = [], []
+
+    def build(g, start, end, tz, lenient):
+        calls.append(start)
+        grid = pd.date_range(start, end, freq="15min", tz="UTC", inclusive="left")
+        new = pd.DataFrame({"solar_be": 2.0}, index=grid)  # revised and new values
+        new.loc[new.index >= pd.Timestamp("2026-11-22 10:00", tz="UTC")] = None
+        return new
+
+    def upload(df, *a):
+        saves.append(df.index.max())
+        archive["df"] = df
+
+    monkeypatch.setattr(submit.hf, "download", lambda repo, path: archive["df"])
+    monkeypatch.setattr(submit.hf, "upload", upload)
+    monkeypatch.setattr(submit, "build", build)
+    start, end = pd.Timestamp("2026-08-20", tz="UTC"), pd.Timestamp("2026-11-23 23:00", tz="UTC")
+    out = submit.archived("target_elia", start, end, tz, save=True)
+    assert calls == ["2026-11-13T23:00:00"]  # REVISE["elia"] = 7 days before 21 Nov, local
+    assert (out.loc[:"2026-11-13 22:45", "solar_be"] == 1).all()
+    assert (out.loc["2026-11-13 23:00":"2026-11-22 09:45", "solar_be"] == 2).all()  # new wins
+    assert out.loc["2026-11-22 10:00":, "solar_be"].isna().all()  # unpublished: no fill
+    assert len(saves) == 1  # the frontier moved from 21 to 22 Nov
+    submit.archived("target_elia", start, end, tz, save=True)  # an hour later, same day
+    assert len(saves) == 1 and calls[-1] == "2026-11-14T23:00:00"
+
+
+def test_archived_raises_on_hf_errors_other_than_a_missing_file(monkeypatch):
+    import pytest
+    from huggingface_hub.errors import LocalEntryNotFoundError
+
+    from openpredico.live import submit
+
+    def down(repo, path):
+        raise LocalEntryNotFoundError("HF unreachable")  # outage, not a missing archive
+
+    monkeypatch.setattr(submit.hf, "download", down)
+    monkeypatch.setattr(submit.hf, "upload", lambda *a: pytest.fail("archive overwritten"))
+    start, end = pd.Timestamp("2026-08-20", tz="UTC"), pd.Timestamp("2026-11-22", tz="UTC")
+    with pytest.raises(LocalEntryNotFoundError):
+        submit.archived("weather_be", start, end, "Europe/Brussels", save=True)

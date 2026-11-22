@@ -16,7 +16,7 @@ from openpredico.config import CONFIGS, load_targets
 from openpredico.data import elia, entsoe, entsoe_bids, esios, hf, openmeteo
 
 TZ = "Europe/Madrid"  # ESIOS local time; calendar default (Spain's targets)
-COLUMN_KEYS = {"source", "geo", "fill", "availability"}
+COLUMN_KEYS = {"source", "geo", "fill", "availability", "lag"}
 AVAILABILITY = {"future", "past"}
 PREFIXES = {"esios", "calendar", "entsoe_bids", "entsoe", "openmeteo", "elia"}
 # ponytail: bid ladder built locally by `entsoe_bids ladder` (File Library login needed), not
@@ -32,7 +32,8 @@ def load_groups(path: Path = CONFIGS / "groups.toml") -> dict[str, dict]:
         for name, c in columns.items():
             where = f"{group}.{name}"
             if c.keys() - COLUMN_KEYS or not {"source", "availability"} <= c.keys():
-                raise ValueError(f"{where}: keys must be source, availability, [geo], [fill]")
+                raise ValueError(f"{where}: keys must be source, availability, [geo/fill/lag]")
+            pd.Timedelta(c.get("lag", "0min"))  # raises on an invalid lag
             if c["availability"] not in AVAILABILITY:
                 raise ValueError(f"{where}: availability must be one of {sorted(AVAILABILITY)}")
             if c["source"].split(":")[0] not in PREFIXES:
@@ -76,7 +77,7 @@ def _column(c: dict, raw: dict, grid: pd.DatetimeIndex, start, end, tz: str) -> 
     if prefix == "entsoe_bids":
         return entsoe_bids.to_series(key, BIDS_LADDER).reindex(grid)
     if prefix in ("entsoe", "elia"):
-        return fetch_source(c["source"], start, end)  # already on the grid
+        return fetch_source(c["source"], start, end, raw)  # already on the grid
     if prefix == "openmeteo":
         area, variable = key.split(".")
         # one request per day for every area and variable of the same run
@@ -105,15 +106,17 @@ def _once(raw: dict, key: str, fetch):
     return raw[key]
 
 
-def fetch_source(source: str, start: str, end: str) -> pd.Series:
-    """One `esios:`, `entsoe:` or `elia:` series over UTC [start, end), native resolution."""
+def fetch_source(source: str, start: str, end: str, cache: dict | None = None) -> pd.Series:
+    """One `esios:`, `entsoe:` or `elia:` series over UTC [start, end), native resolution.
+
+    `cache`: requests already made in this build (`entsoe:` and `elia:` only)."""
     prefix, key = source.split(":")
     if prefix == "esios":
         return esios.fetch(int(key), start, end)
     if prefix == "entsoe":
-        return entsoe.fetch(key, start, end)
+        return entsoe.fetch(key, start, end, cache)
     if prefix == "elia":
-        return elia.fetch(key, start, end)
+        return elia.fetch(key, start, end, cache)
     raise ValueError(f"no fetcher for source {source!r}")
 
 

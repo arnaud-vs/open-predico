@@ -33,12 +33,24 @@ RETRY_WAITS = (10, 30, 60, 0)  # seconds after each failed try; four tries, the 
 _last = 0.0
 
 
-def fetch(key: str, start: str | pd.Timestamp, end: str | pd.Timestamp) -> pd.Series:
-    """One `entsoe:` source over UTC [start, end), MW on the 15-min grid; NaN where unpublished."""
+def fetch(
+    key: str, start: str | pd.Timestamp, end: str | pd.Timestamp, cache: dict | None = None
+) -> pd.Series:
+    """One `entsoe:` source over UTC [start, end), MW on the 15-min grid; NaN where unpublished.
+
+    `cache` (one group build): each (document, psr, window) is fetched once, so `A75_B18+B19`
+    and `A75_B18` share their B18 request.
+    """
     document, _, psrs = key.partition("_")
     start, end = (pd.to_datetime(t, utc=True) for t in (start, end))  # naive = UTC
     grid = pd.date_range(start, end, freq=STEP, inclusive="left", name="time")
-    parts = [_fetch_psr(document, psr or None, start, end) for psr in psrs.split("+")]
+    cache = {} if cache is None else cache
+    parts = []
+    for psr in psrs.split("+"):
+        k = ("entsoe", document, psr, start, end)
+        if k not in cache:
+            cache[k] = _fetch_psr(document, psr or None, start, end)
+        parts.append(cache[k])
     if any(p.empty for p in parts):
         return pd.Series(float("nan"), index=grid, name=key)
     # each series is carried forward to its own last period, so the sum stops at the earliest

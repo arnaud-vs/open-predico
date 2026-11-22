@@ -40,3 +40,18 @@ def test_fetch_empty_range_needs_no_request():
 
     s = entsoe.fetch("A75_B18+B19", "2026-11-10", "2026-11-09")  # publish before D+1 starts
     assert s.empty
+
+
+def test_group_build_fetches_each_psr_once(monkeypatch):
+    from openpredico.data.groups import build
+
+    calls = []
+
+    def get(document, psr, start, end):
+        calls.append(psr)
+        return doc(("2026-01-01T00:00Z", "2026-01-01T01:00Z", "PT15M", {1: 1}))
+
+    monkeypatch.setattr(entsoe, "_get", get)
+    monkeypatch.setattr(entsoe, "MIN_INTERVAL", 0)
+    build("target_50hertz", "2026-01-01", "2026-01-01 01:00")  # B18+B19, B16, B18, B19
+    assert sorted(calls) == ["B16", "B18", "B19"]

@@ -5,11 +5,11 @@ Read [PLAN.md](PLAN.md) before changing anything: it records every design decisi
 ## Map
 
 - `configs/targets.toml`: forecasting targets (Predico resource, truth source, origin, test period).
-- `configs/groups.toml`: feature columns, one line each, with `availability` = `future` | `past`.
+- `configs/groups.toml`: feature columns, one line each, with `availability` = `future` | `past` (and an optional publication `lag`).
 - `src/openpredico/data/`: `esios.py` and `entsoe.py` (API clients), `groups.py` (builds feature frames), `hf.py` (Hugging Face storage).
 - `src/openpredico/models/`: `baselines.py`, `tsfm/` (one adapter per foundation model, optional extras).
 - `src/openpredico/evaluation/`: `backtest.py` (rolling origin), `metrics.py` (Predico's scores).
-- `src/openpredico/live/`: daily submission. The only code that touches Predico or secrets.
+- `src/openpredico/live/`: submission (`modal_app.py` tick every 15 min; `submit.py` with the feature archive on HF). The only code that touches Predico or secrets.
 
 Adding a target? Read PLAN.md > Adding a target first: it lists the Spain-specific code left.
 

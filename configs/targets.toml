@@ -4,6 +4,7 @@
 #         "generation" -> clipped to [0, capacity]
 # origin: local time on D-1 when the forecast is made (the live run is later: 14:15 for a
 #         15:00 gate, 16:15 for 17:00; live/modal_app.py)
+# intraday (optional): Predico's hourly challenges; live submits every hour, from now
 # gate:   local time on D-1 when Predico closes the D+1 session
 # column: the target's column in `groups`, whose source is `truth`
 # groups: feature groups (configs/groups.toml) the target's models see
@@ -105,6 +106,9 @@ capacity = 13000  # ponytail: Elia monitored capacity, Total, Nov 2026 (12601 MW
 timezone = "Europe/Brussels"
 origin = "09:00"  # D+1 gate 10:00 Brussels (Predico's Elia program)
 gate = "10:00"
+# Predico also opens a challenge every hour (gate at the next full hour, the next 24 h): live
+# submits every hour, forecast from now (live/submit.py `in_session`, `forecast`)
+intraday = true
 test_period = ["2025-11-01", "2026-10-25"]  # weather benchmark v4 ends 2026-10-25
 # Elia's forecast (Predico's owner benchmark), scored as config elia_dayahead11h
 tso = { q10 = "tso_q10_be", q50 = "tso_q50_be", q90 = "tso_q90_be" }

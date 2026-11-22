@@ -9,6 +9,7 @@
 #   fill         value for missing quarter-hours (none = keep NaN)
 #   availability "future" = known for the target day before the gate
 #                "past"   = only known up to the forecast origin
+#   lag          publication lag of a past column, e.g. "30min" (default: PUBLICATION_LAG, 2 h)
 
 [target]
 mfrr_energy = { source = "esios:10250", fill = 0, availability = "past" }
@@ -119,7 +120,7 @@ holiday_de = { source = "calendar:holiday_de", availability = "future" }
 
 # --- Belgium (Elia Open Data): belgium_solar_opendata_elia ---
 [target_elia]  # Elia's measured PV, Belgium total (TSO + DSO), MW: Predico's truth
-solar_be = { source = "elia:solar.measured", availability = "past" }
+solar_be = { source = "elia:solar.measured", availability = "past", lag = "30min" }  # ods210
 
 [capacity_be]  # Elia's monitored PV capacity, Belgium total, MW: published ahead (forecast rows)
 capacity_be = { source = "elia:solar.monitoredcapacity", availability = "future" }

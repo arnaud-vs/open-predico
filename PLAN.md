@@ -112,9 +112,11 @@ Rules enforced by the harness:
 
 ## Live operations
 
-- **Continuous submission only:** one forecast per day covering D+1 to D+10. Predico slices it at each gate closure. If a run fails, yesterday's forecast still covers tomorrow. D+1 comes from the live config (`t0gamma_cov_ctx90`: best Apache-2.0 model in the backtest, 2026-11-03), D+2 to D+10 from the slot-climatology baseline. EDP program pays D+1 only (Predico programs page, Nov 2026), so D+2 to D+10 exist only as a fallback. The fallback is not harmless: on 2026-11-08 the run crashed (HF 429 before submitting) and Predico scored the previous day's climatology D+2 as our D+1. Next: backtest t0 at a D+2 origin (14:00 on D-2) and use it for the tail if it beats climatology there.
-- **Scheduler: Modal** (`live/modal_app.py`, Starter plan: 5 crons, $30/month free credit). GitHub Actions cron was dropped (2026-11-05): scheduled runs started 5-7 h late. Three crons serve every target, in Madrid time (Berlin shares the offsets): `submit` at 14:15 and 16:15 forecasts the targets whose session is open (`submit.in_session`: the hour before the gate, so Germany at 14:15 and Spain at 16:15); `check` at :30 and :45 of both hours resubmits only targets whose open challenge isn't `ready` in `market/session/coverage` or that have no t0 run archived in `live-private` today (`submit.missing`; coverage alone counts yesterday's climatology tail as ready); `publish` at 15:30 and 17:30 publishes everything gated and rebuilds the dashboard. `gate_closure` in the API is authoritative. Cost ~$0.65/month.
-- **Late or failed features:** left out of the live run (`groups.build(lenient=True)`; known-future columns with gaps on D+1 are dropped in `submit.forecast`), names logged. TSFMs take any covariate set; only the target's own history is required. The latest submission counts.
+- **Continuous submission only:** one forecast per day covering D+1 to D+10 (Belgium: every hour, from now). Predico slices it at each gate closure. If a run fails, yesterday's forecast still covers tomorrow. D+1 comes from the live config (`t0gamma_cov_ctx90`: best Apache-2.0 model in the backtest, 2026-11-03), D+2 to D+10 from the slot-climatology baseline. EDP program pays D+1 only (Predico programs page, Nov 2026), so D+2 to D+10 exist only as a fallback. The fallback is not harmless: on 2026-11-08 the run crashed (HF 429 before submitting) and Predico scored the previous day's climatology D+2 as our D+1. Next: backtest t0 at a D+2 origin (14:00 on D-2) and use it for the tail if it beats climatology there.
+- **Scheduler: Modal** (`live/modal_app.py`, Starter plan: 5 crons, $30/month free credit). GitHub Actions cron was dropped (2026-11-05): scheduled runs started 5-7 h late. Two crons serve every target, in Madrid time (Berlin and Brussels share the offsets); the wind-pair app has a third. `tick` (2026-11-22, replaced the `submit` and `check` crons) runs at :15, :30 and :45 of every hour on one container (`max_containers=1`: an overlapping tick queues instead of submitting twice) and submits the targets `submit.missing` lists: in session (`submit.in_session`: the hour before the gate, so Belgium at 09:15, Germany at 14:15 and Spain at 16:15; `intraday` targets every hour) and either without a run in `live-private` today (this hour for intraday) or with an open challenge not `ready` in `market/session/coverage` (coverage alone counts yesterday's climatology tail as ready). The first tick of a session submits, the later ones retry. A tick with nothing to do logs in to Predico and lists `live-private` (seconds; no torch import, no model load, so it shares the forecast image). `publish` at 09:30, 15:30, 17:30 and 21:30 publishes everything gated and rebuilds the dashboard. `gate_closure` in the API is authoritative. Cost: ~72 ticks plus ~28 forecast runs a day (Belgium hourly), a few $/month.
+- **Feature archive:** every non-calendar group lives in `benchmark/archive/<group>.parquet` (`submit.archived`), seeded from the backfill, extended each run from its frontier (first local day not fully held) minus a revision window per source (`submit.REVISE`: ESIOS 7 days, Elia 7, ENTSO-E 35, Open-Meteo 0); refetched values win. Saved only when the frontier reaches a later day: about one commit per group a day (15 groups). Only a missing file reseeds; any other HF error fails the run, so an outage never overwrites the archive.
+- **HF commits a day:** `live-private` one per run (forecast + inputs in one commit): ~24 Belgium + 4 Spain/Germany, plus retries; archives ~15; `publish` 4 runs x ~11. ~90 a day, at most ~15 in one hour: far from HF's rate limits. Hourly inputs grow `live-private` by ~24 files a day.
+- **Late or failed features:** left out of the live run (`groups.build(lenient=True)`; known-future columns with gaps on D+1 are dropped in `submit.forecast`; intraday runs: see Elia solar), names logged. TSFMs take any covariate set; only the target's own history is required. The latest submission counts.
 - **`submit`:** build features → predict → validate (full grid, no NaN, sorted, ≤ 240 h) → submit → save forecast and exact inputs to HF `live-private`. Never prints forecast values (logs may be shared; the repo is public).
 - **`publish`:** after gate closure, copy closed days to public HF `live`; fetch actuals and Predico's official scores for us; recompute scores until the month freezes (day 7 of the next month); fail if today's submission is missing.
 - **Monitoring:** Modal failure alerts (enable in workspace settings) plus the `publish` check (which catches skipped runs).
@@ -144,8 +146,9 @@ for source licences, private data lineage, known seed-vintage limits, timing che
 
 A target is an entry in `targets.toml` (`column`, `groups`, `truth`, `timezone`, `gate`, ...) plus
 its feature groups in `groups.toml`. Remaining Spain-specific code: `to_grid` (ESIOS hourly to
-15-min switch at Madrid midnight), the mFRR zero fill in `experiment.features`, the single
-`PUBLICATION_LAG`, and the Modal crons in `modal_app.py` (one per gate time; Starter allows 5).
+15-min switch at Madrid midnight) and the mFRR zero fill in `experiment.features`. Past columns
+published faster than the 2 h `PUBLICATION_LAG` set their own `lag` in groups.toml. No new cron:
+`tick` (every 15 min) acts on every target's session; `intraday = true` adds hourly runs.
 
 ### 50Hertz wind and solar (`germany_wind_50hertz_ca`, `germany_solar_50hertz_ca`)
 
@@ -165,9 +168,9 @@ its feature groups in `groups.toml`. Remaining Spain-specific code: `to_grid` (E
 - **Backtest (2026-11-08, test year, ratio to `slot_climatology_28d`):** `t0gamma_cov_ctx90`
   wind RMSE 0.41, Winkler 0.39, coverage 84% (climatology 73%); solar RMSE 0.48, Winkler 0.52,
   coverage 90% (78%). The weather covariates carry it; ablations and the other TSFMs are next.
-- **Live:** same config as Spain (`t0gamma_cov_ctx90` D+1, climatology D+2..D+10). `submit` at
-  14:15 (session 14:00-15:00), `check` at 14:30/14:45, `publish` at 15:30, all crons shared with
-  Spain. Needs `ENTSOE_API_KEY` in the Modal secret, and Open-Meteo's commercial licence before
+- **Live:** same config as Spain (`t0gamma_cov_ctx90` D+1, climatology D+2..D+10). `tick`
+  submits at 14:15 (session 14:00-15:00) and retries at 14:30/14:45, `publish` at 15:30, all
+  crons shared with Spain. Needs `ENTSOE_API_KEY` in the Modal secret, and Open-Meteo's commercial licence before
   production. Risk: ESIOS published the DE-LU/BE/NL prices between 13:15 and 14:05 on
   2026-11-08, close to the 14:15 run; if they arrive late the run logs them as late (NaN). Switch
   `da_price_de` to ENTSO-E A44 (out by 13:16) if that happens.
@@ -178,7 +181,9 @@ its feature groups in `groups.toml`. Remaining Spain-specific code: `to_grid` (E
   `measured` (region Belgium) up to 2026-10-25, then ods209 `measured_upscaled` with
   gridconnectiontype Total (TSO + DSO; DSO alone is ~4% lower), ods210 for the latest hours
   (`elia:solar.*`, `data/elia.py`).
-- **Origin:** 09:00 Brussels for the 10:00 D+1 gate (hourly intraday sessions not covered).
+- **Origin:** 09:00 Brussels for the 10:00 D+1 gate; hourly intraday runs (see Intraday below).
+- **Publication lag:** 30 min for `solar_be` (`lag` in groups.toml: ods210 is near-real-time),
+  in the backtest (`backtest.cut_past`) and live alike; backtests before 2026-11-22 used 2 h.
 - **Capacity:** Elia monitored capacity 12.1 GW (2026-10-25), clip at 12.2 GW; max seen 8.6 GW.
 - **Features:** `target_elia` (past); future: `weather_be` (Open-Meteo ECMWF IFS 00 UTC run of
   D-1, out ~06:40 UTC), `weather_be_d2` (ICON-D2 03 UTC run of D-1, out ~05:00 UTC; archived since
@@ -200,11 +205,19 @@ its feature groups in `groups.toml`. Remaining Spain-specific code: `to_grid` (E
   (`..._knmi_`); + AIFS 1.102 / 0.976 (`..._aifs_`); all 1.076 / 0.958, full year 1.155 / 1.022
   (`t0gamma_cov_ctx90`, live). Capacity alone barely helps; KNMI and AIFS each ~4%.
 - **Live (production) since 2026-11-16:** `t0gamma_cov_ctx90` D+1 with all four weather runs and
-  capacity (since 2026-11-15), climatology D+2..D+10. `submit` at 09:15, `check` at 09:30/09:45
-  (the shared crons gained the 09 hour). Open-Meteo: 4 requests x 11 points x ~92 days = ~4000
-  calls per run, under the free tier's 5000/h; a failed submit plus a `check` retry in the same
-  hour would exceed it. Intraday challenges (hourly, starting the same day) are not covered:
-  the forecast starts at D+1, and `check` skips them.
+  capacity (since 2026-11-15), climatology D+2..D+10.
+- **Intraday (2026-11-22):** Predico opens a challenge every hour (gate at the next full hour,
+  the next 24 h) and fills its slots with our latest submission. `intraday = true` in
+  targets.toml: `tick` submits every hour at :15 (retries :30/:45), t0 from now through the end
+  of D+1 (the 09:15 run is the D+1 one), climatology after. The weather stays the D-1 runs; a
+  fresher run needs a backtest first. Before ~07 UTC the D+1 runs aren't out: those runs keep
+  the weather with NaN on D+1 (t0 masks it) and drop only a model missing on today's remaining
+  steps; in the D+1 session hour a model missing on D+1 is dropped as before. Runs outside the
+  D+1 session hour go to `live-private/intraday/`, so `publish` (which reads `forecasts/`) is
+  unchanged. Not backtested intraday: the backtest covers the 09:00 D-1 origin only.
+- **Open-Meteo:** with the archive, a run fetches only days not archived yet: one request per
+  missing model-day (11 points each), so ~44 calls per run while the D+1 runs are pending
+  (hours 00-07) and 0 after; ~400 calls a day, far under the free tier (5000/h).
   `live = false` in targets.toml keeps a target out of live/.
 
 ## Predico rules that shape the repo
