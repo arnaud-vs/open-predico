@@ -179,11 +179,12 @@ def catalog(out: Path) -> None:
     write(out, "features.json", features)
 
 
-# Region outlines for the weather-points map (geoBoundaries, pinned release), per market.
+# Region and country outlines for the weather-points map (geoBoundaries, pinned release).
 GB = "https://github.com/wmgeolab/geoBoundaries/raw/9469f09/releaseData/gbOpen"
 REGIONS = {
     "de": {
         "url": f"{GB}/DEU/ADM1/geoBoundaries-DEU-ADM1_simplified.geojson",
+        "country": f"{GB}/DEU/ADM0/geoBoundaries-DEU-ADM0_simplified.geojson",
         "keep": {"Berlin", "Brandenburg", "Hamburg", "Mecklenburg-Vorpommern", "Sachsen"}
         | {"Sachsen-Anhalt", "Thüringen"},  # the 50Hertz control area
         "label": "50Hertz control area (states)",
@@ -191,6 +192,7 @@ REGIONS = {
     },
     "be": {
         "url": f"{GB}/BEL/ADM2/geoBoundaries-BEL-ADM2_simplified.geojson",
+        "country": f"{GB}/BEL/ADM0/geoBoundaries-BEL-ADM0_simplified.geojson",
         "keep": None,  # every province
         "label": "Belgian provinces",
         "credit": "geoBoundaries (ODbL 1.0)",
@@ -234,24 +236,31 @@ def _round(coords):
     )
 
 
+def _outlines(url: str, keep: set | None = None) -> dict:
+    """A geoBoundaries layer as a small FeatureCollection: name and rounded coordinates."""
+    return {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {"name": f["properties"]["shapeName"]},
+                "geometry": f["geometry"] | {"coordinates": _round(f["geometry"]["coordinates"])},
+            }
+            for f in requests.get(url, timeout=120).json()["features"]
+            if keep is None or f["properties"]["shapeName"] in keep
+        ],
+    }
+
+
 def geo(out: Path) -> None:
-    """Per market with Open-Meteo inputs: region outlines and the weather points (weight share)."""
+    """Per market with Open-Meteo inputs: region and country outlines, the weather points (weight
+    share)."""
     data = {}
     for market, shorts in MARKETS.items():
         areas = weather_areas(shorts)
         if not areas:
             continue
         region = REGIONS["be" if market.startswith("be") else "de"]
-        fc = requests.get(region["url"], timeout=120).json()
-        features = [
-            {
-                "type": "Feature",
-                "properties": {"name": f["properties"]["shapeName"]},
-                "geometry": f["geometry"] | {"coordinates": _round(f["geometry"]["coordinates"])},
-            }
-            for f in fc["features"]
-            if region["keep"] is None or f["properties"]["shapeName"] in region["keep"]
-        ]
         sets = {}  # same points -> one set, listing every run read on them
         for a in sorted(areas):
             points, w = openmeteo.POINTS[a], openmeteo.WEIGHTS.get(a)
@@ -265,7 +274,8 @@ def geo(out: Path) -> None:
             entry["areas"].append(a)
             entry["runs"].append(run)
         data[market] = {
-            "regions": {"type": "FeatureCollection", "features": features},
+            "regions": _outlines(region["url"], region["keep"]),
+            "country": _outlines(region["country"]),
             "label": region["label"],
             "credit": region["credit"],
             "sets": list(sets.values()),

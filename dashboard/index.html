@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>open-predico</title>
+<link rel="icon" href="data:,">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
@@ -130,8 +131,11 @@ td.desc { min-width: 280px; color: var(--ink-soft); }
 .day.cont { background: var(--surface); border: 2px dotted var(--cont); color: var(--ink); }
 .day.miss { background: repeating-linear-gradient(45deg, var(--grid) 0 3px, var(--surface) 3px 6px); }
 .day.pg { opacity: 0.55; }
-.map { height: 440px; border-radius: 8px; border: 1px solid var(--line); }
+/* Own stacking context: Leaflet's panes (z-index 400+) stay under the sticky bar. */
+.map { height: 440px; border-radius: 8px; border: 1px solid var(--line); position: relative; z-index: 0; isolation: isolate; }
 .leaflet-container { font: 12px var(--sans); background: var(--grid); }
+.city { white-space: nowrap; font: 500 11px var(--sans); color: var(--ink); text-shadow: 0 0 3px var(--surface), 0 0 3px var(--surface); pointer-events: none; }
+.city i { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--ink); margin-right: 4px; vertical-align: 1px; }
 tr.pg td { color: var(--ink-soft); }
 .heat { display: grid; grid-template-columns: 64px repeat(31, minmax(10px, 1fr)); gap: 2px; font: 10px var(--mono); color: var(--ink-soft); min-width: 520px; }
 .heat div { aspect-ratio: 1; border-radius: 2px; }

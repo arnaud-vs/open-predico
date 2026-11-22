@@ -191,6 +191,42 @@ function configStyle(name) {
   const sibs = CONFIGS.filter(c => (fam ? c.startsWith(fam[0]) : !FAMILY.some(([p]) => c.startsWith(p))));
   return { color, dash: DASHES[Math.max(0, sibs.indexOf(name)) % DASHES.length] };
 }
+// A line swatch with the config's colour and dash, as in the charts.
+const swatch = name => { const st = configStyle(name); return `<svg width="22" height="6" aria-hidden="true" style="flex:none"><line x1="0" x2="22" y1="3" y2="3" stroke="${st.color}" stroke-width="2.5" stroke-dasharray="${st.dash.join(" ")}"/></svg>`; };
+
+// Config names as readable parts: t0gamma_cov_ecmwfd2_knmi_ctx90 -> t0-gamma, covariates, 90 d,
+// IFS + ICON-D2 + KNMI. `wx` = the market's weather models (weather.json), what a plain `cov`
+// config reads. Unknown parts land in `notes` as they are.
+const MODEL_NAMES = [["slot_climatology", "Climatology"], ["t0gamma", "t0-gamma"], ["chronos2", "Chronos-2"], ["timesfm3", "TimesFM 3"], ["timestral5m", "Timestral 5M"], ["timeh2o", "TimeH2O"], ["elia", "Elia (TSO)"], ["entsoe", "TSO (ENTSO-E)"]];
+const WX = { ecmwf: "IFS", icond2: "ICON-D2", knmi: "KNMI", aifs: "AIFS" };
+const wxShort = name => name.replace("ECMWF ", "").replace("KNMI HARMONIE-AROME", "KNMI");
+function parseConfig(name, wx = []) {
+  const known = MODEL_NAMES.find(([p]) => name === p || name.startsWith(p + "_"));
+  const parts = name.slice(known ? known[0].length : name.indexOf("_") + 1 || name.length).split("_").filter(Boolean);
+  const r = { model: known ? known[1] : name.split("_")[0], cov: null, ctx: null, weather: null, notes: [] };
+  let explicit = null, without = [];
+  for (const p of parts) {
+    let x;
+    if (p === "cov" || p === "uni") r.cov = p === "cov";
+    else if ((x = p.match(/^ctx(\d+)$/) ?? p.match(/^(\d+)d$/))) r.ctx = +x[1];
+    else if (p === "ecmwfd2") (explicit ??= []).push("IFS", "ICON-D2");
+    else if (WX[p]) (explicit ??= []).push(WX[p]);
+    else if ((x = p.match(/^no(ecmwf|icond2)$/))) without.push(WX[x[1]]);
+    else if (p === "cap") r.notes.push("+ PV capacity");
+    else if ((x = p.match(/^o(\d\d)(\d\d)$/))) r.notes.push(`origin ${x[1]}:${x[2]}`);
+    else if ((x = p.match(/^no(\d+)$/))) r.notes.push(`without ESIOS ${x[1]}`);
+    else if ((x = p.match(/^dayahead(\d+)h$/))) r.notes.push(`issued ${x[1]}:00 D-1`);
+    else if (p === "a69") r.notes.push("day-ahead (A69)");
+    else r.notes.push(p);
+  }
+  // ponytail: a `noX` ablation may predate later weather groups, so it doesn't list the rest.
+  if (r.cov) r.weather = explicit ?? (without.length ? [`all but ${without.join(", ")}`] : wx.map(wxShort));
+  return r;
+}
+const cfgLabel = (name, wx) => {
+  const p = parseConfig(name, wx);
+  return [p.model, p.cov == null ? "" : p.cov ? "cov" : "uni", p.ctx == null ? "" : `${p.ctx} d`, p.weather?.join(" + ") ?? "", ...p.notes].filter(Boolean).join(" · ");
+};
 
 // --- Daily scores (same formulas as src/openpredico/evaluation/metrics.py) ------------------
 function dailyScores(x, q10, q50, q90, obs) {
@@ -414,8 +450,8 @@ function leaderboard(days, baseline) {
 }
 
 async function renderBacktest(root) {
-  const [allDays, meta, prof] = await Promise.all([json("days.json"), json("meta.json"), json("profiles.json")]);
-  const m = mk(), targets = shortsOf(m, meta).filter(t => allDays[t]);
+  const [allDays, meta, prof, wxAll] = await Promise.all([json("days.json"), json("meta.json"), json("profiles.json"), json("weather.json").catch(() => ({}))]);
+  const m = mk(), wx = (wxAll[m.id]?.models ?? []).map(r => r.name), targets = shortsOf(m, meta).filter(t => allDays[t]);
   if (!targets.length) {
     root.innerHTML = `<div class="head"><div><h1>Backtest</h1></div></div><div class="card"><p class="empty">No backtest of ${esc(m.name)} is published yet.</p></div>`;
     return;
@@ -423,15 +459,16 @@ async function renderBacktest(root) {
   const days = Object.fromEntries(targets.map(t => [t, allDays[t]]));
   CONFIGS = meta.configs.map(c => c.name).filter(c => targets.some(t => days[t].configs[c]));
   const type = Object.fromEntries(meta.configs.map(c => [c.name, c.type]));
-  const context = Object.fromEntries(meta.configs.map(c => [c.name, c.context]));
+  const info = Object.fromEntries(CONFIGS.map(c => [c, parseConfig(c, wx)]));
+  const label = c => cfgLabel(c, wx);
   const lb = leaderboard(days, meta.baseline), t0 = targets[0];
   const top = lb.filter(r => r.config !== meta.live_config && r.config !== meta.baseline).slice(0, 2).map(r => r.config);
-  let sel = [meta.live_config, meta.baseline, ...top].filter(c => CONFIGS.includes(c)), types = new Set(), absolute = false;
+  let sel = [meta.live_config, meta.baseline, ...top].filter(c => CONFIGS.includes(c)), types = new Set(), absolute = false, sortK = "rank", sortDir = 1;
 
   root.innerHTML = `
     <div class="head"><div><h1>Backtest</h1><p class="lede">Test year 1 Nov 2025 – 31 Oct 2026. Each forecast is made at 14:00 ${m.city} on D-1 from data published before then, and scored per local day as Predico does. <b>Lower is better.</b> ${m.missingTruth}</p></div></div>
-    <div class="card"><div class="card-head"><div><h2>Leaderboard</h2><p class="sub">Scores relative to <span class="mono">${esc(meta.baseline)}</span> (= 1.000) on the days both are scored. Highlighted: the live config.</p></div>
-      <div class="controls"><div class="chips" id="bt-types">${["baseline", "foundation model", "ML"].filter(t => CONFIGS.some(c => type[c] === t)).map(t => `<button class="chip" data-v="${t}" aria-pressed="false">${t}</button>`).join("")}</div>
+    <div class="card"><div class="card-head"><div><h2>Leaderboard</h2><p class="sub">Scores relative to <span class="mono">${esc(meta.baseline)}</span> (= 1.000) on the days both are scored. Highlighted: the live config. Hover a model for its config name; click a column to sort.</p></div>
+      <div class="controls"><div class="chips" id="bt-types">${["baseline", "TSO forecast", "foundation model", "ML"].filter(t => CONFIGS.some(c => type[c] === t)).map(t => `<button class="chip" data-v="${t}" aria-pressed="false">${t}</button>`).join("")}</div>
       <label class="tog"><input type="checkbox" id="bt-abs"> absolute scores</label></div></div>
       <div class="tablewrap" id="bt-lb"></div>
       <details><summary class="sub">How the scores work</summary><ul class="sub">
@@ -441,9 +478,11 @@ async function renderBacktest(root) {
         <li><b>Score</b>: geometric mean of the ${targets.length > 1 ? "four normalised values (RMSE and Winkler, both targets)" : "two normalised values (RMSE and Winkler)"}; rank sorts by it.</li></ul></details>
     </div>
     <div class="card"><div class="card-head"><div><h2>Configs in the charts below</h2><p class="sub">Same colour = same model family; dash = variant.</p></div></div><div class="chips" id="bt-sel"></div></div>
-    <div class="card"><div class="card-head"><div><h2>Day viewer</h2><p class="sub">q50 per config, interval of the first selected config, truth in black. Times in UTC.</p></div>
+    <div class="card"><div class="card-head"><div><h2>Day viewer</h2><p class="sub">The configs selected above, line styles as there. Times in UTC.</p></div>
       <div class="controls">${targetSeg("dv-t", targets, t0)}<input type="date" id="dv-d" value="${days[t0].days.at(-1)}" min="${days[t0].days[0]}" max="${days[t0].days.at(-1)}"></div></div>
-      <p class="sub" id="dv-s"></p><div class="chart" id="dv-chart"></div></div>
+      <div class="chart" id="dv-chart"></div>
+      <div class="legend sub"><span>lines: q50 of each config</span><span class="legend-i"><span class="sw box"></span>q10–q90 (first selected)</span><span class="legend-i"><span class="sw" style="border-color:var(--obs)"></span>actual</span></div>
+      <div class="legend sub" id="dv-s"></div></div>
     <div class="card"><div class="card-head"><div><h2>By month</h2></div><div class="controls">${targetSeg("mo-t", targets, t0)}${seg("mo-m", [["rmse", "RMSE"], ["winkler", "Winkler"]], "rmse")}</div></div><div class="chart" id="mo-chart"></div></div>
     <div class="card"><div class="card-head"><div><h2>Absolute error of q50 by hour and weekday</h2><p class="sub">${m.city} time.</p></div><div class="controls">${targetSeg("pr-t", targets, t0)}</div></div>
       <div class="grid2"><div class="chart" id="pr-h"></div><div class="chart" id="pr-w"></div></div></div>
@@ -452,13 +491,40 @@ async function renderBacktest(root) {
       <div class="tablewrap" id="wr"></div></div>`;
 
   const lbEl = root.querySelector("#bt-lb");
+  // Sortable columns: [key, header, value for sorting, cell html, numeric].
+  const yesNo = v => (v == null ? "–" : v ? "yes" : "no");
   function drawLb() {
     const rows = lb.filter(r => !types.size || types.has(type[r.config]));
     const cols = targets.flatMap(t => [[`${t} rmse rel`, `${LABEL[t]} RMSE`, f3], [`${t} winkler rel`, `${LABEL[t]} Winkler`, f3], [`${t} coverage`, `${LABEL[t]} cov.`, pct],
       ...(absolute ? [[`${t} rmse`, `${LABEL[t]} RMSE abs`, f1], [`${t} winkler`, `${LABEL[t]} Winkler abs`, f1], [`${t} days`, "days", String]] : [])]);
-    lbEl.innerHTML = `<table><thead><tr><th>Rank</th><th>Config</th><th>Type</th><th class="n">Context</th><th class="n">Score</th>${cols.map(c => `<th class="n">${c[1]}</th>`).join("")}</tr></thead><tbody>${rows.map(r =>
-      `<tr class="${r.config === meta.live_config ? "live" : ""} ${r.rank <= 3 ? `m${r.rank}` : ""}"><td class="n">${r.rank <= 3 ? `<span class="medal" title="${["Gold", "Silver", "Bronze"][r.rank - 1]}">${r.rank}</span>` : r.rank ?? "–"}</td><td class="mono">${esc(r.config)}${r.config === meta.live_config ? ' <span class="pill">live</span>' : ""}</td><td class="muted">${type[r.config]}</td><td class="n muted">${context[r.config] == null ? "–" : `${context[r.config]} d`}</td><td class="n ${relClass(r.score)}"><b>${f3(r.score)}</b></td>${cols.map(([k, , f]) => `<td class="n ${k.endsWith("rel") ? relClass(r[k]) : ""}">${f(r[k])}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+    const notes = rows.some(r => info[r.config].notes.length), weather = rows.some(r => info[r.config].weather?.length);
+    const COLS = [
+      ["rank", "Rank", r => r.rank, r => (r.rank <= 3 ? `<span class="medal" title="${["Gold", "Silver", "Bronze"][r.rank - 1]}">${r.rank}</span>` : r.rank ?? "–"), true],
+      ["model", "Model", r => info[r.config].model, r => `<span title="${esc(r.config)}">${esc(info[r.config].model)}</span>${r.config === meta.live_config ? ' <span class="pill">live</span>' : ""}`],
+      ["cov", "Covariates", r => yesNo(info[r.config].cov), r => yesNo(info[r.config].cov)],
+      ["ctx", "Context", r => info[r.config].ctx, r => (info[r.config].ctx == null ? "–" : `${info[r.config].ctx} d`), true],
+      ...(weather ? [["wx", "Weather", r => info[r.config].weather?.join(", ") ?? "", r => esc(info[r.config].weather?.join(", ") || "–")]] : []),
+      ...(notes ? [["notes", "Notes", r => info[r.config].notes.join(", "), r => esc(info[r.config].notes.join(", "))]] : []),
+      ["type", "Type", r => type[r.config], r => esc(type[r.config])],
+      ["score", "Score", r => r.score, r => `<b>${f3(r.score)}</b>`, true],
+      ...cols.map(([k, h, f]) => [k, h, r => r[k], r => f(r[k]), true]),
+    ];
+    const col = COLS.find(c => c[0] === sortK) ?? COLS[0];
+    const val = r => col[2](r);
+    const sorted = [...rows].sort((a, b) => {
+      const x = val(a), y = val(b);
+      if (x == null || x === "") return 1; if (y == null || y === "") return -1;  // empty last
+      return (col[4] ? x - y : String(x).localeCompare(String(y))) * sortDir;
+    });
+    const cls = k => (k === "score" || k.endsWith("rel") ? "rel" : "");
+    lbEl.innerHTML = `<table><thead><tr>${COLS.map(([k, h, , , num]) => `<th class="${num ? "n" : ""}" data-k="${k}" style="cursor:pointer" aria-sort="${k === sortK ? (sortDir > 0 ? "ascending" : "descending") : "none"}">${h}${k === sortK ? (sortDir > 0 ? " ↑" : " ↓") : ""}</th>`).join("")}</tr></thead><tbody>${sorted.map(r =>
+      `<tr class="${r.config === meta.live_config ? "live" : ""} ${r.rank <= 3 ? `m${r.rank}` : ""}">${COLS.map(([k, , v, html, num]) => `<td class="${num ? "n" : ""} ${cls(k) ? relClass(v(r)) : ["cov", "ctx", "type", "wx", "notes"].includes(k) ? "muted" : ""}">${html(r)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
   }
+  lbEl.addEventListener("click", e => {
+    const th = e.target.closest("th[data-k]"); if (!th) return;
+    sortDir = th.dataset.k === sortK ? -sortDir : 1; sortK = th.dataset.k;
+    drawLb();
+  });
   drawLb();
   root.querySelector("#bt-types").addEventListener("click", e => {
     const b = e.target.closest("button"); if (!b) return;
@@ -469,7 +535,7 @@ async function renderBacktest(root) {
   root.querySelector("#bt-abs").addEventListener("change", e => { absolute = e.target.checked; drawLb(); });
 
   const selEl = root.querySelector("#bt-sel");
-  const drawSel = () => (selEl.innerHTML = lb.map(r => { const st = configStyle(r.config); return `<button class="chip" data-v="${r.config}" aria-pressed="${sel.includes(r.config)}"><span class="sw" style="width:14px;border-color:${st.color};border-top-style:${st.dash.length ? "dashed" : "solid"}"></span> ${esc(r.config)}</button>`; }).join(""));
+  const drawSel = () => (selEl.innerHTML = lb.map(r => `<button class="chip legend-i" data-v="${r.config}" title="${esc(r.config)}" aria-pressed="${sel.includes(r.config)}">${swatch(r.config)} ${esc(label(r.config))}</button>`).join(""));
   drawSel();
   selEl.addEventListener("click", e => {
     const b = e.target.closest("button"); if (!b) return;
@@ -477,7 +543,7 @@ async function renderBacktest(root) {
     b.setAttribute("aria-pressed", String(sel.includes(b.dataset.v)));
     redrawSel();
   });
-  const cfgSeries = c => { const st = configStyle(c); return line(c, st.color, { dash: st.dash, width: c === meta.live_config ? 2.5 : 1.75 }); };
+  const cfgSeries = c => { const st = configStyle(c); return line(label(c), st.color, { dash: st.dash, width: c === meta.live_config ? 2.5 : 1.75 }); };
 
   // By month
   let moT = t0, moM = "rmse";
@@ -524,12 +590,12 @@ async function renderBacktest(root) {
     const [i0, i1] = r, sl = a => a.slice(i0, i1 + 1);
     const xs = sl(x), obs = target[dvT].slice(off + i0, off + i1 + 1);
     const k = days[dvT].days.indexOf(key);
-    root.querySelector("#dv-s").innerHTML = k < 0 ? "" : sel.map(c => `<span class="mono">${esc(c)}</span> RMSE ${f1(days[dvT].configs[c].rmse[k])}, Winkler ${f1(days[dvT].configs[c].winkler[k])}`).join(" · ");
+    root.querySelector("#dv-s").innerHTML = k < 0 ? "" : `<span>This day:</span>${sel.map(c => `<span class="legend-i" title="${esc(label(c))}">${swatch(c)} RMSE ${f1(days[dvT].configs[c].rmse[k])} · Winkler ${f1(days[dvT].configs[c].winkler[k])}</span>`).join("")}`;
     const first = steps[0];
     const build = (w, h) => new uPlot({
       width: w, height: h, tzDate: tzUTC, legend: { show: false }, scales: { x: { time: true } },
       cursor: { points: { size: 6, width: 2, fill: css("--surface") } },
-      series: [{}, { stroke: "transparent", points: { show: false } }, { stroke: "transparent", points: { show: false } }, ...sel.map(cfgSeries), line("Observed", css("--obs"), { width: 2.25 })],
+      series: [{}, { stroke: "transparent", points: { show: false } }, { stroke: "transparent", points: { show: false } }, ...sel.map(cfgSeries), line("Actual", css("--obs"), { width: 2.25 })],
       bands: first ? [{ series: [2, 1], fill: css("--band") }] : [],
       axes: axes(`${LABEL[dvT]} (${meta.units[dvT]})`),
       plugins: [tooltip(seriesRows(fmtUTC))],
@@ -549,7 +615,7 @@ async function renderBacktest(root) {
     const d = days[wrT].configs;
     const cell = (a, b) => { let w = 0, n = 0; const A = d[a][wrM], B = d[b][wrM]; for (let i = 0; i < A.length; i++) if (A[i] != null && B[i] != null) { n++; if (A[i] < B[i]) w++; } return n ? w / n : null; };
     root.querySelector("#wr").innerHTML = order.length < 2 ? `<p class="empty">Select at least two configs above.</p>` :
-      `<table><thead><tr><th>A \\ B</th>${order.map(c => `<th class="n mono">${esc(c)}</th>`).join("")}</tr></thead><tbody>${order.map(a => `<tr><td class="mono">${esc(a)}</td>${order.map(b => {
+      `<table><thead><tr><th>A \\ B</th>${order.map(c => `<th class="n" title="${esc(c)}" style="white-space:normal;min-width:8em">${esc(label(c))}</th>`).join("")}</tr></thead><tbody>${order.map(a => `<tr><td title="${esc(a)}" style="white-space:nowrap">${esc(label(a))}</td>${order.map(b => {
         if (a === b) return `<td></td>`;
         const v = cell(a, b), g = v == null ? 0 : (v - 0.5) * 2;
         const bg = g >= 0 ? `color-mix(in srgb, var(--accent) ${Math.round(g * 70)}%, transparent)` : `color-mix(in srgb, var(--bad) ${Math.round(-g * 55)}%, transparent)`;
@@ -737,16 +803,23 @@ async function renderFeatures(root) {
     <div class="head"><div><h1>Input features</h1><p class="lede">The columns the ${esc(m.name)} models see, one line each in <span class="mono">configs/groups.toml</span>. Availability <b>future</b> = known for the target day before the gate, <b>past</b> = only known up to the forecast origin. <b>Live</b> marks the columns the latest live run used.</p></div></div>
     ${geo ? `<div class="card"><div class="card-head"><div><h2>Weather sampling</h2><p class="sub">${geo.sets.map(s => `${s.points.length} points (${s.weighted ? "weighted by PV capacity; dot size = weight" : "plain mean"}): ${s.runs.join(" and ")} run of D-1`).join(" · ")}. Outline: ${esc(geo.label)}.</p></div></div>
       <div class="map" id="ft-map" role="img" aria-label="Map of the weather points"></div>
-      <p class="sub">Boundaries: ${esc(geo.credit)}. Map: © OpenStreetMap contributors.</p></div>` : ""}
+      <p class="sub">Boundaries: ${esc(geo.credit)}.</p></div>` : ""}
     ${wx ? weatherTimeline(wx, m) : ""}
     <div class="card"><div class="card-head"><div><h2>Feature columns</h2><p class="sub">${rows.length} columns · ${rows.filter(r => used.has(r.column)).length} in the latest live run</p></div></div>
       <div class="tablewrap"><table><thead><tr><th>Live</th><th>Group</th><th>Column</th><th>Source</th><th>Availability</th><th>Description</th></tr></thead><tbody>${rows.map(r =>
         `<tr><td>${used.has(r.column) ? '<span class="pill">live</span>' : ""}</td><td class="mono">${esc(r.group)}</td><td class="mono">${esc(r.column)}</td><td class="mono">${esc(r.source)}</td><td>${esc(r.availability)}</td><td class="desc">${esc(r.description)}</td></tr>`).join("")}</tbody></table></div></div>`;
-  if (geo && window.L) drawMap(root.querySelector("#ft-map"), geo);
+  // In the chart registry, so a theme switch redraws it in the new colours.
+  if (geo && window.L) mount(root.querySelector("#ft-map"), () => drawMap(root.querySelector("#ft-map"), geo, CITIES[m.c] ?? []), 440);
 }
 
-function drawMap(el, geo) {
-  const map = L.map(el, { scrollWheelZoom: false });
+// A few major cities as labels on the plain map.
+const CITIES = {
+  be: [["Brussels", 50.85, 4.35], ["Antwerp", 51.22, 4.40], ["Ghent", 51.05, 3.72], ["Liège", 50.63, 5.57], ["Charleroi", 50.41, 4.44]],
+  de: [["Berlin", 52.52, 13.40], ["Hamburg", 53.55, 9.99], ["Leipzig", 51.34, 12.37], ["Dresden", 51.05, 13.74], ["Rostock", 54.09, 12.10]],
+};
+
+function drawMap(el, geo, cities) {
+  const map = L.map(el, { scrollWheelZoom: false, attributionControl: false });
   const regions = L.geoJSON(geo.regions, {
     style: { color: css("--accent-ink"), weight: 1.5, fillColor: css("--accent"), fillOpacity: 0.12 },
     onEachFeature: (f, layer) => layer.bindTooltip(esc(f.properties.name)),
@@ -754,36 +827,44 @@ function drawMap(el, geo) {
   const bounds = regions.getBounds();
   for (const s of geo.sets) for (const [lat, lon] of s.points) bounds.extend([lat, lon]);
   map.fitBounds(bounds.pad(0.05));  // view first: vector layers added to a map without one throw
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 12, attribution: "© OpenStreetMap" }).addTo(map);
+  // No tiles: the country on the grey background, the regions we use, a few cities.
+  if (geo.country) L.geoJSON(geo.country, { interactive: false, style: { color: css("--ink-soft"), weight: 1.5, fillColor: css("--surface"), fillOpacity: 1 } }).addTo(map);
   regions.addTo(map);
+  for (const [name, lat, lon] of cities)
+    L.marker([lat, lon], { icon: L.divIcon({ className: "city", html: `<i></i>${esc(name)}`, iconSize: null, iconAnchor: [3, 8] }), interactive: false, keyboard: false }).addTo(map);
   for (const s of geo.sets) for (const [lat, lon, w] of s.points) {
     const r = s.weighted ? 5 + Math.sqrt(w) * 30 : 7;
     L.circleMarker([lat, lon], { radius: r, color: css("--surface"), weight: 2, fillColor: css("--tso"), fillOpacity: 0.9 })
       .bindTooltip(`${lat.toFixed(2)}, ${lon.toFixed(2)}${s.weighted ? ` · weight ${(w * 100).toFixed(1)}%` : ""}<br>${s.runs.join(", ")}`)
       .addTo(map);
   }
+  return { destroy: () => map.remove(), setSize: () => map.invalidateSize() };
 }
 
 // --- Weather runs timeline (Input features, targets that read Open-Meteo) -------------------
 // One row per weather model: each archived run as a bar from init to when it is on the API
 // (openmeteo.LATENCY), the run we read highlighted; origin, submit and gate as vertical lines.
-// Intraday: the target day, no chosen run yet, a gate every hour.
+// Intraday: the target day, no chosen run yet, a gate every hour. The axis is in the market's
+// local time, like the origin and gate; runs keep their UTC names in the hover text and table.
 function weatherTimeline(w, m) {
   const intraday = !!m.intraday, H = 3600, OTHER = "color-mix(in srgb, var(--ink-soft) 40%, transparent)";
   const t0 = intraday ? w.day_start : Math.min(...w.models.map(r => r.used)) - 6 * H;
   const t1 = intraday ? w.day_end : w.gate + 2 * H;
-  const L = 150, R = 12, W = 900, rowH = 30, top = 22, n = w.models.length, plotH = n * rowH, Hh = top + plotH + 30;
+  const L = 150, R = 20, W = 900, rowH = 30, top = 22, n = w.models.length, plotH = n * rowH, Hh = top + plotH + 30;
   const X = s => L + ((s - t0) / (t1 - t0)) * (W - L - R);
   const hm = s => { const d = new Date(s * 1000); return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`; };
   const local = new Intl.DateTimeFormat("en-GB", { timeZone: m.tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
   const loc = s => local.format(new Date(s * 1000));
+  const date = new Intl.DateTimeFormat("en-GB", { timeZone: m.tz, day: "numeric", month: "short" });
   const dur = s => `${Math.floor(s / H)}h${pad(Math.round((s % H) / 60))}`;
-  let svg = "";
-  for (let s = Math.ceil(t0 / (3 * H)) * 3 * H; s <= t1; s += 3 * H) {  // grid every 3 h
-    const d = new Date(s * 1000), mid = !d.getUTCHours();
+  // ponytail: one UTC offset for the whole window (no DST switch inside it).
+  const utc = new Intl.DateTimeFormat("en-GB", { timeZone: m.tz, timeZoneName: "shortOffset" }).formatToParts(new Date(t0 * 1000)).find(p => p.type === "timeZoneName").value.replace("GMT", "UTC");
+  const off = (+utc.slice(3) || 0) * H, city = m.city, zone = `${city} time (${utc})`;
+  let svg = `<text x="${L - 10}" y="${top - 8}" text-anchor="end" style="fill:var(--ink-soft);font-family:var(--sans)">${esc(zone)}</text>`;
+  for (let s = Math.ceil((t0 + off) / (3 * H)) * 3 * H - off; s <= t1; s += 3 * H) {  // grid every 3 local hours
     svg += `<line x1="${X(s)}" x2="${X(s)}" y1="${top}" y2="${top + plotH}" style="stroke:var(--grid)"/>`;
-    svg += `<text x="${X(s)}" y="${top + plotH + 14}" text-anchor="middle" style="fill:var(--ink-soft)">${hm(s)}</text>`;
-    if (mid) svg += `<text x="${X(s)}" y="${top + plotH + 27}" text-anchor="middle" style="fill:var(--ink-soft)">${d.getUTCDate()} ${MON[d.getUTCMonth()]}</text>`;
+    svg += `<text x="${X(s)}" y="${top + plotH + 14}" text-anchor="middle" style="fill:var(--ink-soft)">${loc(s)}</text>`;
+    if (loc(s) === "00:00") svg += `<text x="${X(s)}" y="${top + plotH + 27}" text-anchor="middle" style="fill:var(--ink-soft)">${date.format(new Date(s * 1000))}</text>`;
   }
   w.models.forEach((r, i) => {
     const y = top + i * rowH + rowH / 2;
@@ -791,13 +872,17 @@ function weatherTimeline(w, m) {
     const inits = [];
     for (let s = Math.floor((t0 - r.latency) / r.cycle) * r.cycle; s < t1; s += r.cycle) inits.push(s);
     inits.sort((p, q) => (p === r.used) - (q === r.used));  // the run we read drawn last, on top
+    // A run slower than the cycle (IFS: out 6h40 after init, every 6 h) overlaps the next one:
+    // alternate lanes so each bar keeps its own end.
+    const lanes = Math.ceil(r.latency / r.cycle);
     for (const s of inits) {
       const a = Math.max(s, t0), b = Math.min(s + r.latency, t1), used = !intraday && s === r.used;
       if (b <= a) continue;
-      const title = `${r.name} ${hm(s)} UTC run: on Open-Meteo ~${hm(s + r.latency)} UTC (${dur(r.latency)} after init)${used ? ", the run we read" : ""}`;
-      svg += `<g><title>${esc(title)}</title><rect x="${X(a)}" y="${y - (used ? 5 : 3)}" width="${Math.max(2, X(b) - X(a))}" height="${used ? 10 : 6}" rx="${used ? 4 : 3}" style="fill:${used ? "var(--accent-ink)" : OTHER};stroke:var(--surface);stroke-width:2"/>`;
-      if (s + r.latency <= t1) svg += `<circle cx="${X(s + r.latency)}" cy="${y}" r="${used ? 5 : 3.5}" style="fill:${used ? "var(--accent-ink)" : "var(--ink-soft)"};stroke:var(--surface);stroke-width:2"/>`;
-      svg += `<rect x="${X(a)}" y="${y - rowH / 2}" width="${Math.max(8, X(b) - X(a))}" height="${rowH}" fill="transparent"/></g>`;
+      const yl = y + (lanes > 1 ? ((Math.round(s / r.cycle) % lanes) - (lanes - 1) / 2) * 9 : 0);
+      const title = `${r.name} ${hm(s)} UTC run (${loc(s)} ${city}): on Open-Meteo ~${loc(s + r.latency)} ${city} (${hm(s + r.latency)} UTC), ${dur(r.latency)} after init${used ? "; the run we read" : ""}`;
+      svg += `<g><title>${esc(title)}</title><rect x="${X(a)}" y="${yl - (used ? 4 : 2.5)}" width="${Math.max(2, X(b) - X(a))}" height="${used ? 8 : 5}" rx="${used ? 4 : 2.5}" style="fill:${used ? "var(--accent-ink)" : OTHER}"/>`;
+      if (s + r.latency <= t1) svg += `<circle cx="${X(s + r.latency)}" cy="${yl}" r="${used ? 5 : 3.5}" style="fill:${used ? "var(--accent-ink)" : "var(--ink-soft)"};stroke:var(--surface);stroke-width:1.5"/>`;
+      svg += `<rect x="${X(a)}" y="${yl - 5}" width="${Math.max(8, X(b) - X(a))}" height="10" fill="transparent"/></g>`;
     }
   });
   const vline = (s, color, dash, label) =>
@@ -813,14 +898,14 @@ function weatherTimeline(w, m) {
     : `<span class="legend-i"><span class="sw thick" style="border-color:var(--accent-ink)"></span>run we read</span><span class="legend-i"><span class="sw" style="border-color:${OTHER};border-top-width:6px"></span>other runs: init → on Open-Meteo</span><span class="legend-i"><span class="sw dash" style="border-color:var(--base)"></span>origin ${loc(w.origin)} ${m.city}</span><span class="legend-i"><span class="sw dot" style="border-color:var(--cont)"></span>live run ${loc(w.submit)}</span><span class="legend-i"><span class="sw" style="border-color:var(--ink)"></span>Predico gate ${loc(w.gate)} ${m.city}</span>`;
   const rows = w.models.map(r => {
     const runs = Array.from({ length: 24 / (r.cycle / H) }, (_, k) => pad((k * r.cycle) / H)).join(", ");
-    return `<tr><td>${esc(r.name)}</td><td class="mono">${runs}</td><td class="n">${dur(r.latency)}</td>${intraday ? `<td class="muted">not chosen yet</td>` : `<td class="mono">${hm(r.used)} UTC, ${fmtDay(new Date(r.used * 1000).toISOString().slice(0, 10))}</td><td class="n">${hm(r.used + r.latency)} UTC</td><td class="n">${dur(w.origin - r.used - r.latency)}</td>`}</tr>`;
+    return `<tr><td>${esc(r.name)}</td><td class="mono">${runs}</td><td class="n">${dur(r.latency)}</td>${intraday ? `<td class="muted">not chosen yet</td>` : `<td class="mono">${hm(r.used)} UTC, ${fmtDay(new Date(r.used * 1000).toISOString().slice(0, 10))}</td><td class="n">${loc(r.used + r.latency)}</td><td class="n">${dur(w.origin - r.used - r.latency)}</td>`}</tr>`;
   }).join("");
   return `<div class="card"><div class="card-head"><div><h2>Weather runs and gates</h2><p class="sub">${intraday
-      ? `Today (${fmtDay(w.day)}), times in UTC. Each archived run from init to when Open-Meteo serves it; Predico's intraday sessions close every hour. Which run the intraday forecasts read is not decided yet.`
-      : `For tomorrow's session (D-1 = ${fmtDay(w.day)}), times in UTC. Each archived run from init to when Open-Meteo serves it (typical delays, measured Nov 2026); the run we read is one that is out well before the ${loc(w.origin)} ${m.city} origin, the same in the backtest and live. Hover a bar for its times.`}</p></div></div>
-    <div class="chart"><svg viewBox="0 0 ${W} ${Hh}" width="100%" role="img" aria-label="Timeline of weather model runs, their availability and the gate; the table below lists the same" style="font:11px var(--mono);display:block">${svg}</svg></div>
+      ? `Today (${fmtDay(w.day)}), chart in ${esc(zone)}. Each archived run from init to when Open-Meteo serves it; Predico's intraday sessions close every hour. Which run the intraday forecasts read is not decided yet.`
+      : `For tomorrow's session (D-1 = ${fmtDay(w.day)}), chart in ${esc(zone)}; runs keep their UTC names. Each archived run from init to when Open-Meteo serves it (typical delays, measured Nov 2026); the run we read is one that is out well before the ${loc(w.origin)} ${m.city} origin, the same in the backtest and live. Hover a bar for its times.`}</p></div></div>
+    <div class="chart" style="overflow-x:auto"><svg viewBox="0 0 ${W} ${Hh}" width="100%" role="img" aria-label="Timeline of weather model runs, their availability and the gate; the table below lists the same" style="font:11px var(--mono);display:block;min-width:640px">${svg}</svg></div>
     <div class="legend sub">${legend}</div>
-    <div class="tablewrap"><table><thead><tr><th>Model</th><th>Runs (UTC)</th><th class="n">Out after</th><th>Run we read</th>${intraday ? "" : `<th class="n">Out at</th><th class="n">Margin to origin</th>`}</tr></thead><tbody>${rows}</tbody></table></div></div>`;
+    <div class="tablewrap"><table><thead><tr><th>Model</th><th>Runs (UTC)</th><th class="n">Out after</th><th>Run we read</th>${intraday ? "" : `<th class="n">Out at (${esc(city)})</th><th class="n">Margin to origin</th>`}</tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 
 // --- Countries and variables (Predico resources) -------------------------------------------
