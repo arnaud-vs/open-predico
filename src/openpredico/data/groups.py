@@ -76,7 +76,7 @@ def _column(c: dict, raw: dict, grid: pd.DatetimeIndex, start, end, tz: str) -> 
     if prefix == "entsoe_bids":
         return entsoe_bids.to_series(key, BIDS_LADDER).reindex(grid)
     if prefix in ("entsoe", "elia"):
-        return fetch_source(c["source"], start, end)  # already on the grid
+        return fetch_source(c["source"], start, end, raw)  # already on the grid
     if prefix == "openmeteo":
         area, variable = key.split(".")
         # one request per day for every area and variable of the same run
@@ -105,15 +105,17 @@ def _once(raw: dict, key: str, fetch):
     return raw[key]
 
 
-def fetch_source(source: str, start: str, end: str) -> pd.Series:
-    """One `esios:`, `entsoe:` or `elia:` series over UTC [start, end), native resolution."""
+def fetch_source(source: str, start: str, end: str, cache: dict | None = None) -> pd.Series:
+    """One `esios:`, `entsoe:` or `elia:` series over UTC [start, end), native resolution.
+
+    `cache`: requests already made in this build (`entsoe:` and `elia:` only)."""
     prefix, key = source.split(":")
     if prefix == "esios":
         return esios.fetch(int(key), start, end)
     if prefix == "entsoe":
-        return entsoe.fetch(key, start, end)
+        return entsoe.fetch(key, start, end, cache)
     if prefix == "elia":
-        return elia.fetch(key, start, end)
+        return elia.fetch(key, start, end, cache)
     raise ValueError(f"no fetcher for source {source!r}")
 
 
