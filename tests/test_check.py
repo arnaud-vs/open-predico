@@ -43,3 +43,18 @@ def test_not_run_lists_session_targets_without_a_run_today():
         "forecasts/spain_mfrr_price/2026-11-08T1515Z.parquet",  # yesterday's
     ]
     assert not_run(now, files) == ["spain_mfrr_price"]
+
+
+def test_missing_never_forecasts_a_challenge_before_its_session(monkeypatch):
+    from openpredico.live import submit
+
+    class Api:
+        def list_repo_files(self, *a, **k):
+            return []
+
+    monkeypatch.setattr(submit, "HfApi", Api)
+    monkeypatch.setattr(submit, "pair_needs_retry", lambda *a: False)
+    now = pd.Timestamp("2026-11-15 12:30", tz="Europe/Madrid").tz_convert("UTC")
+    assert "spain_mfrr_price" not in submit.missing(_Client(), now)  # open, not ready, gate 17:00
+    now = pd.Timestamp("2026-11-15 16:30", tz="Europe/Madrid").tz_convert("UTC")
+    assert {"spain_mfrr_energy", "spain_mfrr_price"} <= set(submit.missing(_Client(), now))

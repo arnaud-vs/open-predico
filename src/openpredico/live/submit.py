@@ -260,22 +260,30 @@ def not_run(now: pd.Timestamp, files: list[str]) -> list[str]:
 
 
 def missing(client: Predico, now: pd.Timestamp) -> list[str]:
-    """Targets to resubmit: not covered on Predico, or no t0 run of ours today."""
+    """Targets in session to (re)submit: not covered on Predico, or no t0 run of ours today.
+
+    Only targets in session: a challenge open hours before its gate is never forecast early.
+    """
     by_resource = {t["predico_resource"]: n for n, t in live_targets().items()}
     files = HfApi().list_repo_files(f"{hf.ORG}/live-private", repo_type="dataset")
-    pending = {by_resource[r] for r in not_ready(client, now)} | set(not_run(now, files))
+    uncovered = {by_resource[r] for r in not_ready(client, now)} & set(in_session(now))
+    pending = uncovered | set(not_run(now, files))
     if pair_needs_retry(now, files):
         pending.add("germany_wind_50hertz_ca")
     return sorted(pending)
 
 
 def check_and_retry() -> None:
-    """Run in each open session before the gate: resubmit targets that `missing` lists."""
+    """One scheduler tick (live/modal_app.py, every 15 min): submit the targets that `missing`
+    lists, so a session's first tick submits and later ones retry what failed."""
     now = pd.Timestamp.now(tz="UTC")
+    if not in_session(now):
+        print("no session of ours open")  # the cheap path: no Predico login, no HF call
+        return
     todo = missing(Predico(), now)
     print(f"missing: {todo}")
     if not todo:
-        return  # done, or no session of ours open right now
+        return  # every target in session has its run and is covered
     main(dry_run=False, only=todo)
     if todo := missing(Predico(), pd.Timestamp.now(tz="UTC")):
         sys.exit(f"still missing after resubmit: {todo}")

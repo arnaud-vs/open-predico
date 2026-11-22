@@ -1,8 +1,8 @@
 """Daily Predico submission on Modal. Logic lives in `submit.py`; this file only says where/when.
 
 Deploy:  uv run --with modal modal deploy src/openpredico/live/modal_app.py
-Once:    uv run --with modal modal run src/openpredico/live/modal_app.py::submit
-         (or ::check, ::publish); submit acts only on targets whose session is open
+Once:    uv run --with modal modal run src/openpredico/live/modal_app.py::tick
+         (or ::publish); tick acts only on targets whose session is open
 Secrets: Modal secret `open-predico` with ESIOS_TOKEN, ENTSOE_API_KEY, HF_TOKEN, PREDICO_EMAIL,
          PREDICO_PASSWORD, PREDICO_PLAYGROUND_URL and PREDICO_URL (live/predico.py URL_VAR picks
          one). See PLAN.md.
@@ -24,33 +24,26 @@ image = (
 )
 app = modal.App("open-predico", image=image, secrets=[modal.Secret.from_name("open-predico")])
 # Each target's D+1 session opens the hour before its gate (Belgium 10:00, Germany 15:00, Spain
-# 17:00, Predico: "CET"). Every job runs in each session hour and acts on what is open, so all
-# targets share three crons (Starter plan: 5). Madrid, Berlin and Brussels share UTC offsets.
+# 17:00, Predico: "CET"); Belgium also has hourly intraday challenges. One `tick` cron acts on
+# whatever is open (Starter plan: 5 crons; this app uses 2, the wind-pair app 1). Madrid, Berlin
+# and Brussels share UTC offsets.
 # ponytail: assumes the gates follow local time in summer; check `gate_closure` in CEST.
 TZ = "Europe/Madrid"
 
 
 @app.function(
-    schedule=modal.Cron("15 9,14,16 * * *", timezone=TZ), cpu=1.0, memory=4096, timeout=1800
+    schedule=modal.Cron("15,30,45 * * * *", timezone=TZ),
+    cpu=1.0,
+    memory=4096,
+    timeout=1800,
+    max_containers=1,  # one tick at a time: an overlapping tick queues, never submits twice
 )
-def submit() -> None:
-    """Forecast and submit the targets whose session is open (Belgium 09:15, Germany 14:15, Spain
-    16:15)."""
-    import pandas as pd
+def tick() -> None:
+    """Submit the targets in session without a run yet (:15), retry what failed (:30, :45).
 
-    from openpredico.live import submit
-
-    if only := submit.in_session(pd.Timestamp.now(tz="UTC")):
-        submit.main(dry_run=False, only=only)
-    else:
-        print("no session of ours open")
-
-
-@app.function(
-    schedule=modal.Cron("30,45 9,14,16 * * *", timezone=TZ), cpu=1.0, memory=4096, timeout=900
-)
-def check() -> None:
-    """Resubmit the targets whose open challenge isn't covered (their submit run failed)."""
+    Same image as the forecast: a tick with nothing to do imports no torch and loads no model
+    (seconds), so a separate light image would save little.
+    """
     from openpredico.live import submit
 
     submit.check_and_retry()
