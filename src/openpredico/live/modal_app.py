@@ -70,9 +70,9 @@ def publish() -> None:
 
 
 @app.function(cpu=1.0, memory=4096, timeout=1800)
-def dry_run(only: list[str]) -> None:
-    """Forecast `only` without submitting or uploading (no Predico login). Spawn it from a
-    deployed app: `modal.Function.from_name("open-predico", "dry_run").spawn([...])`."""
+def dry_run(only: str) -> None:
+    """Forecast `only` (comma-separated targets) without submitting or uploading (no Predico
+    login): `modal run src/openpredico/live/modal_app.py::dry_run --only a,b`."""
     from openpredico.live import submit
 
-    submit.main(dry_run=True, only=only)
+    submit.main(dry_run=True, only=only.split(","))
