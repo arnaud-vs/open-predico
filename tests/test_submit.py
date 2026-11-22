@@ -70,8 +70,9 @@ def test_forecast_drops_a_weather_model_missing_on_d1_or_absent():
 def test_archived_fetches_only_new_days_and_keeps_old_ones(monkeypatch):
     from openpredico.live import submit
 
-    idx = pd.date_range("2026-01-01", "2026-11-20", freq="15min", tz="UTC", inclusive="left")
-    old = pd.DataFrame({"ghi_be": 1.0}, index=idx)
+    tz = "Europe/Brussels"
+    idx = pd.date_range("2026-01-01", "2026-11-20", freq="15min", tz=tz, inclusive="left")
+    old = pd.DataFrame({"ghi_be": 1.0}, index=idx.tz_convert("UTC"))
     calls, saved = [], {}
 
     def build(g, start, end, tz, lenient):
@@ -83,13 +84,45 @@ def test_archived_fetches_only_new_days_and_keeps_old_ones(monkeypatch):
     monkeypatch.setattr(submit.hf, "upload", lambda df, *a: saved.update(df=df))
     monkeypatch.setattr(submit, "build", build)
     start, end = pd.Timestamp("2026-08-20", tz="UTC"), pd.Timestamp("2026-11-22", tz="UTC")
-    out = submit.archived("weather_be", start, end, "Europe/Brussels", save=True)
-    assert calls == ["2026-11-18T00:00:00"]  # from the day before the last complete day
+    out = submit.archived("weather_be", start, end, tz, save=True)
+    assert calls == ["2026-11-19T23:00:00"]  # first local day not archived; a run never changes
     assert out.index[0] == start and out.index[-1] < end and out.notna().all().all()
-    assert (out.loc[:"2026-11-17", "ghi_be"] == 1).all() and (
-        out.loc["2026-11-18":, "ghi_be"] == 2
-    ).all()
+    assert (out.loc[:"2026-11-19 22:45", "ghi_be"] == 1).all()
+    assert (out.loc["2026-11-19 23:00":, "ghi_be"] == 2).all()
     assert saved["df"].index[0] == idx[0]  # old days kept
+
+
+def test_archived_refetches_the_revision_window_and_saves_once_a_day(monkeypatch):
+    from openpredico.live import submit
+
+    tz = "Europe/Brussels"
+    idx = pd.date_range("2026-08-01", "2026-11-21 10:00", freq="15min", tz="UTC", inclusive="left")
+    archive = {"df": pd.DataFrame({"solar_be": 1.0}, index=idx)}
+    calls, saves = [], []
+
+    def build(g, start, end, tz, lenient):
+        calls.append(start)
+        grid = pd.date_range(start, end, freq="15min", tz="UTC", inclusive="left")
+        new = pd.DataFrame({"solar_be": 2.0}, index=grid)  # revised and new values
+        new.loc[new.index >= pd.Timestamp("2026-11-22 10:00", tz="UTC")] = None
+        return new
+
+    def upload(df, *a):
+        saves.append(df.index.max())
+        archive["df"] = df
+
+    monkeypatch.setattr(submit.hf, "download", lambda repo, path: archive["df"])
+    monkeypatch.setattr(submit.hf, "upload", upload)
+    monkeypatch.setattr(submit, "build", build)
+    start, end = pd.Timestamp("2026-08-20", tz="UTC"), pd.Timestamp("2026-11-23 23:00", tz="UTC")
+    out = submit.archived("target_elia", start, end, tz, save=True)
+    assert calls == ["2026-11-13T23:00:00"]  # REVISE["elia"] = 7 days before 21 Nov, local
+    assert (out.loc[:"2026-11-13 22:45", "solar_be"] == 1).all()
+    assert (out.loc["2026-11-13 23:00":"2026-11-22 09:45", "solar_be"] == 2).all()  # new wins
+    assert out.loc["2026-11-22 10:00":, "solar_be"].isna().all()  # unpublished: no fill
+    assert len(saves) == 1  # the frontier moved from 21 to 22 Nov
+    submit.archived("target_elia", start, end, tz, save=True)  # an hour later, same day
+    assert len(saves) == 1 and calls[-1] == "2026-11-14T23:00:00"
 
 
 def test_archived_raises_on_hf_errors_other_than_a_missing_file(monkeypatch):

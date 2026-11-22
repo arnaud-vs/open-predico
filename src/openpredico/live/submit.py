@@ -29,7 +29,14 @@ MODEL = "theforecastingcompany/t0-gamma"  # best Apache-2.0 model in the backtes
 CONFIG, FALLBACK = "t0gamma_cov_ctx90", "slot_climatology_28d"  # backtest config names
 CONTEXT_DAYS = 90
 HORIZON_DAYS = 10
-ARCHIVE = "archive/{}.parquet"  # weather archive per group, benchmark repo
+ARCHIVE = "archive/{}.parquet"  # per non-calendar group, in the (public) benchmark repo
+# Days refetched before an archive's frontier each run, per source; refetched values win.
+# ESIOS overwrites some forecasts after publication (PLAN: Benchmark), later revisions unchecked;
+# ENTSO-E revises A75 over 35 days (PLAN: 50Hertz); Elia's daily ods209 replaces the
+# near-real-time ods210 a day later; an Open-Meteo run never changes. The window costs one
+# request per series whatever its length (ESIOS chunks a month, ENTSO-E a year, Elia one export).
+REVISE = {"openmeteo": 0, "esios": 7, "elia": 7, "entsoe": 35}
+STEP = pd.Timedelta("15min")
 
 
 def build_frames(
@@ -41,45 +48,70 @@ def build_frames(
 ) -> dict[str, pd.DataFrame]:
     """`groups` from CONTEXT_DAYS before `first` (default now) through the end of now's D+1.
 
-    Weather groups come from their archive (`archived`); `save` writes the extended archive.
+    Every group but calendar ones (computed) comes from its archive (`archived`); `save` writes
+    the extended archives.
     """
     local = now.tz_convert(tz)
     since = (first if first is not None else now).tz_convert(tz)
     start = (since - pd.Timedelta(days=CONTEXT_DAYS + 1)).normalize().tz_convert("UTC")
     end = (local.normalize() + pd.DateOffset(days=2)).tz_convert("UTC")
-    # ponytail: ~30 ESIOS ids x 4 monthly chunks at 1 req/s, refetched daily; cache on HF if slow
     out, groups_toml = {}, load_groups()
     for g in groups:
         t0_ = time.time()
-        if all(c["source"].startswith("openmeteo:") for c in groups_toml[g].values()):
-            out[g] = archived(g, start, end, tz, save)
-        else:
+        if all(c["source"].startswith("calendar:") for c in groups_toml[g].values()):
             out[g] = build(g, *(t.tz_localize(None).isoformat() for t in (start, end)), tz, True)
+        else:
+            out[g] = archived(g, start, end, tz, save)
         print(f"built {g} in {time.time() - t0_:.0f} s")  # timing only, no values
     return out
 
 
 def archived(g: str, start: pd.Timestamp, end: pd.Timestamp, tz: str, save: bool) -> pd.DataFrame:
-    """Weather group `g` on [start, end) from its archive on HF (`benchmark/archive/<g>.parquet`),
-    extended with the days from its last complete day on: an archived run never changes, so each
-    run fetches ~3 days instead of the whole context. Old days are kept (the growing backtest
-    set). Seeded from the backtest backfill (`load_benchmark`) if there is no archive yet."""
+    """Group `g` on [start, end) from its archive on HF (`benchmark/archive/<g>.parquet`),
+    extended each run: only the days from its `frontier` on, minus its sources' REVISE window,
+    are fetched, and fetched values win. Old days are kept (the growing backtest set). Seeded
+    from the backtest backfill (`load_benchmark`) if there is no archive yet. `save` writes the
+    archive back only when its frontier reached a later day: about one commit a day per group,
+    even for hourly runs."""
+    columns = load_groups()[g]
     try:
         old = hf.download("benchmark", ARCHIVE.format(g))
     except RemoteEntryNotFoundError:  # no archive yet: seed from the backfill, else fetch it all
         # Only a missing file: any other error (HF down) raises, so a reseed never overwrites
         # the archive. Not LocalEntryNotFoundError either: that one means HF was unreachable.
         old = load_benchmark({g}).get(g, pd.DataFrame())
-    complete = old.dropna().index
-    since = start if complete.empty else max(start, complete.max().floor("D") - pd.Timedelta("1D"))
-    new = build(g, *(t.tz_localize(None).isoformat() for t in (since, end)), tz, lenient=True)
-    merged = new.combine_first(old).sort_index()
-    if save and not new.empty:
-        hf.upload(
-            merged, "benchmark", ARCHIVE.format(g), f"Weather archive {g}: through {end:%Y-%m-%d}"
-        )
+    old = old[[c for c in columns if c in old]]  # columns dropped from groups.toml stay out
+    was = frontier(old, columns, tz)
+    revise = pd.Timedelta(days=max(REVISE[c["source"].split(":")[0]] for c in columns.values()))
+    since = start if was is None or old.index.min() > start else max(start, was - revise)
+    new = pd.DataFrame()
+    if since < end:
+        new = build(g, *(t.tz_localize(None).isoformat() for t in (since, end)), tz, lenient=True)
+    merged = new if old.empty else old if new.empty else new.combine_first(old).sort_index()
+    merged = merged[[c for c in columns if c in merged]]
+    reached = frontier(merged, columns, tz)
+    if save and reached is not None and (was is None or reached > was):
+        msg = f"Archive {g}: through {reached:%Y-%m-%d}"
+        hf.upload(merged, "benchmark", ARCHIVE.format(g), msg)
     grid = pd.date_range(start, end, freq="15min", inclusive="left", name="time")
     return merged.reindex(grid)
+
+
+def frontier(df: pd.DataFrame, columns: dict, tz: str) -> pd.Timestamp | None:
+    """Start (UTC) of the first local day `df` doesn't fully hold; None if it holds nothing.
+
+    The earlier of its last row with any past value and its last row with any future value, so
+    sparse columns (mFRR direct activations) don't hold it back. Columns with a `fill` are left
+    out: the fill runs past the published data.
+    """
+    ends = []
+    for availability in ("past", "future"):
+        cols = [c for c, d in columns.items() if d["availability"] == availability]
+        if cols := [c for c in cols if c in df and "fill" not in columns[c]]:
+            ends.append(df[cols].dropna(how="all").index.max())
+    if not ends or any(pd.isna(e) for e in ends):
+        return None
+    return (min(ends) + STEP).tz_convert(tz).normalize().tz_convert("UTC")
 
 
 def forecast(
