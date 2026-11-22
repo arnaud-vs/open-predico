@@ -28,7 +28,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 
-from openpredico.data import openmeteo
+from openpredico.data import hf, openmeteo
 
 PROJECT = "open-predico"
 TABLE = f"{PROJECT}.weathernext_3.weathernext_3_0_0_0p1deg"
@@ -119,6 +119,46 @@ def _run(client, run: pd.Timestamp, areas: list[str]) -> dict[str, pd.DataFrame]
         out[a] = openmeteo._mean(AREAS[a], frames[i : i + n]).dropna(how="all")
         i += n
     return out
+
+
+def backfill_runs(start, end, area: str = "be_wn3", every: int = 500) -> None:
+    """Every run (hourly init) in [start, end), newest first, with all the leads it has (48 h,
+    360 h at 00/12 UTC), for intraday and D+N backtests. Private (licence):
+    `weather-private/archive_runs/weather_<area>.parquet`, index (run, time), hourly
+    openmeteo.VARIABLES and `available` = run + LATENCY (estimated). Resumable: runs already in
+    the file are skipped; uploads every `every` runs. A run that isn't there is retried next time.
+    """
+    path = f"archive_runs/weather_{area}.parquet"
+    try:
+        parts = [hf.download(hf.PRIVATE, path)]
+    except Exception:  # first run
+        parts = []
+    done = set(parts[0].index.get_level_values("run")) if parts else set()
+    start, end = (pd.Timestamp(x) for x in (start, end))
+    start, end = (x.tz_localize("UTC") if x.tz is None else x for x in (start, end))
+    runs = pd.date_range(start, end, freq="h", inclusive="left")[::-1]
+    runs = [r for r in runs if r not in done]
+
+    def one(run):
+        try:
+            return run, _run(_client(), run, [area]).get(area)
+        except RuntimeError:  # billed over MAX_BILLED: stop everything
+            raise
+        except Exception as e:  # ponytail: transient BigQuery errors, retried on the next call
+            print(f"weathernext {run}: {type(e).__name__}, skipped")
+            return run, None
+
+    for i in range(0, len(runs), every):
+        with ThreadPoolExecutor(WORKERS) as pool:
+            for run, df in pool.map(one, runs[i : i + every]):
+                if df is not None:
+                    df = df.assign(available=run + LATENCY).rename_axis("time")
+                    parts.append(pd.concat({run: df}, names=["run", "time"]))
+        if parts:
+            out = pd.concat(parts).sort_index()
+            parts = [out]
+            n = out.index.get_level_values("run").nunique()
+            hf.upload(out, hf.PRIVATE, path, f"WN3 run archive {area}: {n} runs")
 
 
 def query(run: pd.Timestamp, points: list[tuple[float, float]]) -> str:

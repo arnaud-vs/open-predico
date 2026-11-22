@@ -66,3 +66,33 @@ def test_credentials_use_modal_identity_token_else_adc(monkeypatch, tmp_path):
     monkeypatch.setenv("MODAL_IDENTITY_TOKEN_FILE", str(tmp_path / "token"))
     assert weathernext.credentials().retrieve_subject_token(None) == "refreshed.jwt"
     weathernext.credentials.cache_clear()
+
+
+def test_backfill_runs_resumes_and_keeps_each_run_with_its_leads(monkeypatch):
+    stored, asked = {}, []
+    t = pd.date_range("2026-11-20 01:00", periods=3, freq="h", tz="UTC")
+
+    def run(client, r, areas):
+        asked.append(r)
+        return {} if r.hour == 2 else {"be_wn3": pd.DataFrame({"ghi": 1.0}, index=t)}
+
+    monkeypatch.setattr(weathernext, "_client", lambda: None)
+    monkeypatch.setattr(weathernext, "_run", run)
+    monkeypatch.setattr(weathernext.hf, "upload", lambda df, *a: stored.update(df=df))
+
+    def download(*a):
+        if "df" not in stored:
+            raise FileNotFoundError
+        return stored["df"]
+
+    monkeypatch.setattr(weathernext.hf, "download", download)
+    weathernext.backfill_runs("2026-11-20 00:00Z", "2026-11-20 03:00Z", every=2)
+    df = stored["df"]
+    assert sorted(set(df.index.get_level_values("run").hour)) == [0, 1]  # 02 UTC run missing
+    assert (
+        len(df) == 6
+        and (df.available - df.index.get_level_values("run")).eq(weathernext.LATENCY).all()
+    )
+    asked.clear()
+    weathernext.backfill_runs("2026-11-20 00:00Z", "2026-11-20 03:00Z")
+    assert [r.hour for r in asked] == [2]  # only the missing run is asked again

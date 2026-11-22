@@ -81,3 +81,15 @@ def dry_run(only: str) -> None:
     from openpredico.live import submit
 
     submit.main(dry_run=True, only=only.split(","))
+
+
+@app.function(cpu=0.5, memory=1024, timeout=24 * 3600)
+def wn3_runs(start: str = "2026-04-03", end: str = "") -> None:
+    """Archive every WeatherNext 3 run for Belgium (weathernext.backfill_runs); here because only
+    this app may log in to Google (WIF condition). Resumable:
+    `modal run --detach src/openpredico/live/modal_app.py::wn3_runs`."""
+    import pandas as pd
+
+    from openpredico.data import weathernext
+
+    weathernext.backfill_runs(start, end or pd.Timestamp.now(tz="UTC").floor("h"))
