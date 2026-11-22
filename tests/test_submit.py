@@ -91,7 +91,8 @@ def test_intraday_forecast_starts_now_and_drops_weather_missing_on_d1():
     assert seen["future"] == []  # both left out: no NaN known-future inputs reach t0
     assert seen["past_end"] == pd.Timestamp("2026-11-14 23:45", tz="UTC")  # 30 min Elia lag
     assert fc.index[0] == pd.Timestamp("2026-11-15 00:30", tz="UTC")  # from now on
-    assert (fc.loc[:"2026-11-16 22:45", "model"] == "t0gamma_cov_ctx90").all()
+    live = "t0gamma_cov_wn3_ctx90"  # targets.toml live_config
+    assert (fc.loc[:"2026-11-16 22:45", "model"] == live).all()
 
 
 def test_archived_fetches_only_new_days_and_keeps_old_ones(monkeypatch):
@@ -200,7 +201,7 @@ def test_wn3_archive_is_private_and_a_bigquery_failure_drops_it(monkeypatch):
 
     tz, name = "Europe/Brussels", "belgium_solar_opendata_elia"
     targets = experiment.load_targets()
-    targets[name]["groups"].append("weather_be_wn3")  # the live switch (PLAN.md)
+    assert "weather_be_wn3" in targets[name]["groups"]  # live since 2026-11-22 (PLAN.md)
     monkeypatch.setattr(experiment, "load_targets", lambda: targets)
     monkeypatch.setattr(submit, "live_targets", lambda: targets)
     idx = pd.date_range("2026-08-01", "2026-11-15 23:00", freq="15min", tz="UTC", inclusive="left")

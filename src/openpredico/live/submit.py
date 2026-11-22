@@ -176,7 +176,9 @@ def forecast(
     else:
         d1 = predict(past, future, days[:1])
     rest = slot_climatology(past.iloc[:, 0], days[1:], tz=tz)  # D+2..D+10: unpaid fallback
-    fc = clip(pd.concat([d1.assign(model=CONFIG), rest.assign(model=FALLBACK)]), t)
+    fc = clip(
+        pd.concat([d1.assign(model=t.get("live_config", CONFIG)), rest.assign(model=FALLBACK)]), t
+    )
     # Predico accepts at most 240 h ahead, so the tail of D+10 is cut
     return fc[fc.index <= now + pd.Timedelta(hours=240)], pd.concat([past, future], axis=1)
 

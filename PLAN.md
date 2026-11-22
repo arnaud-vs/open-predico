@@ -181,6 +181,9 @@ published faster than the 2 h `PUBLICATION_LAG` set their own `lag` in groups.to
   `measured` (region Belgium) up to 2026-10-25, then ods209 `measured_upscaled` with
   gridconnectiontype Total (TSO + DSO; DSO alone is ~4% lower), ods210 for the latest hours
   (`elia:solar.*`, `data/elia.py`).
+- **Elia's own forecasts as features:** its day-ahead runs (11:00 and 18:00 D-1) come after the
+  10:00 D+1 gate, so never for D+1. Candidates: `mostrecentforecast` for intraday (needs our own
+  archive: Elia overwrites it) and the week-ahead forecast for D+N (gate 00:00).
 - **Origin:** 09:00 Brussels for the 10:00 D+1 gate; hourly intraday runs (see Intraday below).
 - **Publication lag:** 30 min for `solar_be` (`lag` in groups.toml: ods210 is near-real-time),
   in the backtest (`backtest.cut_past`) and live alike; backtests before 2026-11-22 used 2 h.
@@ -199,7 +202,12 @@ published faster than the 2 h `PUBLICATION_LAG` set their own `lag` in groups.to
   00 UTC 1.24 / 1.10 (`t0gamma_cov_noicond2_ctx90`). 2026-04-03 to 2026-10-25 (ICON-D2 days):
   both runs 1.11 / 1.03 (`t0gamma_cov_ctx90`), ECMWF 00 UTC 1.21 / 1.07, ICON-D2 alone 1.29 /
   1.24 (`t0gamma_cov_noecmwf_ctx90`); climatology 2.65 / 2.07. Elia issues at 11:00 D-1, after
-  the gate. Coverage ~88% (Elia 85%): our bands are a bit wide.
+  the gate. Coverage ~88% (Elia 85%), daylight alone too: our bands look wide, but Winkler
+  says otherwise (2026-11-22, `t0gamma_cov_wn3_ctx90`, 7 Apr to 25 Oct): scaling every band
+  around Q50 by one factor (in-sample oracle) gives 0.95x +0.5%, 1.0x best, 1.1x +0.1%, 0.8x
+  +3.5% Winkler; rolling per-slot conformal (`models/conformal.recalibrate`, 60 days up to
+  D-2) scores Winkler 0.926 (CQR on our band, coverage 87%) and 1.022 (around Q50 as the wind
+  pair, 83%) vs 0.912 uncalibrated. Misses are large when they happen, so no recalibration.
 - **Ablation (2026-11-15, no holiday_es; 7 Apr to 25 Oct, 202 days / full year, RMSE / Winkler
   ratio to Elia):** ECMWF + ICON-D2 1.143 / 1.026, full year 1.196 / 1.072
   (`t0gamma_cov_ecmwfd2_ctx90`); + capacity 1.138 / 1.021 (`..._cap_`); + KNMI 1.102 / 0.989
@@ -209,9 +217,9 @@ published faster than the 2 h `PUBLICATION_LAG` set their own `lag` in groups.to
   Oct / 28 Aug to 25 Oct (WN3 real-time runs) / full year):** all (live, rerun)
   1.079 / 0.945 / 89%, 1.088 / 0.911, 1.186 / 1.029 (`t0gamma_cov_ctx90`); all + WN3
   1.047 / 0.912 / 89%, 1.062 / 0.896, 1.165 / 1.003 (`t0gamma_cov_wn3_ctx90`); WN3 instead of IFS
-  1.140 / 0.963, 1.039 / 0.881 (`t0gamma_cov_wn3_noifs_ctx90`; full year meaningless: no weather
-  before April). The 30 min lag alone moved all from 1.076 / 0.958 to 1.079 / 0.945. WN3 adds
-  ~3% on both scores; it doesn't replace IFS.
+  1.140 / 0.963, 1.039 / 0.881 (`noifs` run, removed 2026-11-22: an odd ablation). The 30 min
+  lag alone moved all from 1.076 / 0.958 to 1.079 / 0.945. WN3 adds ~3% on both scores; it
+  doesn't replace IFS.
 - **WeatherNext 3 (`weather_be_wn3`, `weather_50hertz_wn3`; DATA_SOURCES.md):** Google DeepMind's
   ensemble mean from BigQuery (`data/weathernext.py`), nearest 0.1 deg cell per point, same
   weights. Belgium reads the 23 UTC run of D-2 (lands ~6h15-7h00 after init, assumed 7h45: out by
@@ -223,7 +231,7 @@ published faster than the 2 h `PUBLICATION_LAG` set their own `lag` in groups.to
   query, `ST_DWITHIN` on the points, lead from the array offset, `maximum_bytes_billed` = dry-run
   estimate + 10% (the estimate is ~750 GB, a run bills up to ~230 MB), stop above 1 GB billed. The
   backfill billed 32 GB (plus 14 GB for an aborted first try).
-- **WeatherNext 3 live (2026-11-22, ready, off):** on Modal, `weathernext.credentials` uses keyless
+- **WeatherNext 3 live (on since 2026-11-22; licence signed off by the maintainer, dry run OK):** on Modal, `weathernext.credentials` uses keyless
   Workload Identity Federation (service-account keys are blocked by org policy): Modal's OIDC
   identity token is exchanged for service account `open-predico-wn` (pool and provider `modal`,
   restricted to our workspace id, environment `main`, app `open-predico`); elsewhere ADC. The
@@ -239,7 +247,9 @@ published faster than the 2 h `PUBLICATION_LAG` set their own `lag` in groups.to
   `features`); the dashboard shows names and groups.toml metadata, no input values (checked
   2026-11-22). Any future publishing of inputs must skip `groups.repo(g) == hf.PRIVATE` groups.
 - **Live (production) since 2026-11-16:** `t0gamma_cov_ctx90` D+1 with all four weather runs and
-  capacity (since 2026-11-15), climatology D+2..D+10.
+  capacity (since 2026-11-15), climatology D+2..D+10. From 2026-11-22 `t0gamma_cov_wn3_ctx90`
+  (+ WN3; `live_config` in targets.toml names the backtest config the live model matches, which
+  runs record as `model` and the dashboard marks live).
 - **Intraday (2026-11-22):** Predico opens a challenge every hour (gate at the next full hour,
   the next 24 h) and fills its slots with our latest submission. `intraday = true` in
   targets.toml: `tick` submits every hour at :15 (retries :30/:45), t0 from now through the end
@@ -265,7 +275,7 @@ published faster than the 2 h `PUBLICATION_LAG` set their own `lag` in groups.to
 
 ## Dashboard
 
-Hugging Face Space (`open-predico/dashboard`), a free static Space: `index.html` + `app.js` (uPlot, no framework) draw JSON that `dashboard/build.py` precomputes from the HF datasets (2026-11-05: replaced the stlite/Streamlit app, which was slow). Gridual palette. Navigation (2026-11-22): countries as main tabs (Spain, Germany, Belgium), variables as subtabs (Spain: mFRR energy, mFRR price; Germany: wind, solar (50Hertz); Belgium: solar D+1, solar intraday), then the four sections below; the hash `#<country>/<variable>/<section>` links to each. Belgium solar intraday shows a placeholder for Live and Backtest until hourly intraday submissions run (benchmark: Elia's `mostrecentforecast` in ods032/ods209/ods210); its target data and inputs are the D+1 ones. Sections:
+Hugging Face Space (`open-predico/dashboard`), a free static Space: `index.html` + `app.js` (uPlot, no framework) draw JSON that `dashboard/build.py` precomputes from the HF datasets (2026-11-05: replaced the stlite/Streamlit app, which was slow). The GitHub `dashboard` workflow pushes page and data from `main` every hour; Modal's `publish` pushes `data/` only (`build.py --upload --data-only`), so a stale Modal deploy never overwrites a newer `app.js`. Gridual palette. Navigation (2026-11-22): countries as main tabs (Spain, Germany, Belgium), variables as subtabs (Spain: mFRR energy, mFRR price; Germany: wind, solar (50Hertz); Belgium: solar D+1, solar intraday), then the four sections below; the hash `#<country>/<variable>/<section>` links to each. Belgium solar intraday shows a placeholder for Live and Backtest until hourly intraday submissions run (benchmark: Elia's `mostrecentforecast` in ods032/ods209/ods210); its target data and inputs are the D+1 ones. Sections:
 
 - **Backtest:** configs discovered from `predictions/backtest/*/` on HF. Leaderboard modelled on GIFT-Eval: one row per config, its name split by `app.js` into model, covariates, context, weather models (a plain `cov` config reads all of the market's, from `weather.json`) and notes (unknown name parts as they are), sortable by any column; type (baseline / TSO forecast / foundation model / ML), RMSE and Winkler per target normalised to `slot_climatology_28d` (ratio of mean daily scores on common days), coverage, aggregate score (geometric mean of the normalised scores) and rank. Win-rate matrix per metric (share of common days where A beats B), errors by month/hour/weekday, day viewer (line styles of the selected configs, no names repeated in the chart).
 - **Target data:** the target columns (`v1/target.parquet`, `v2/target_50hertz.parquet`) explored: time series (daily or 15-min window), patterns by quarter-hour/weekday/month, distribution, missing values and zeros per day, price vs energy (Spain).
@@ -292,7 +302,13 @@ Hugging Face Space (`open-predico/dashboard`), a free static Space: `index.html`
 
 ## Open items
 
-- Predico: access to the EDP program and playground; whether we may publish our own rank.
-- ESIOS: token; reuse terms for publishing a data snapshot and for commercial use.
-- Timestral license ("Modified MIT") to read; T0-gamma weights and Toto CPU support to confirm.
-- ESIOS indicator ids for the v1 feature groups.
+Done items are in the sections above. As of 2026-11-22:
+
+- Predico: score endpoint returns 0 metrics on every challenge (maintainer asked Predico);
+  their rule for quarter-hours without truth; full Elia D+N rules once published.
+- Elia D+N (paid from January 2026 challenges): check all of D+10 lies inside the 240 h cut at
+  the 23:15 run; then a D+N model (weather runs to 360 h).
+- Open-Meteo: commercial licence for live use; refund of the Standard plan (no Single Runs API).
+- Weather-runs backfill (Modal `weather-runs-backfill`): stop the app once done (~2026-11-29).
+- WeatherNext 3: hourly run archive (48 h) for the intraday backtest; 00/12 UTC 360 h runs for D+N.
+- ESIOS: reuse terms for a published data snapshot. ENTSO-E: reuse terms for the bid archive.
