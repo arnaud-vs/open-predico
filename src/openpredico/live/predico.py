@@ -63,14 +63,20 @@ class Predico:
         """Per-challenge readiness before the gate (`ready`, `source`)."""
         return self._get("market/session/coverage")
 
-    def our_challenges(self, resource_name: str) -> list[dict]:
-        """Challenges of the resource for which Predico registered a session submission of ours."""
+    def our_challenges(self, resource_name: str, since: str | None = None) -> list[dict]:
+        """Challenges of the resource for which Predico registered a session submission of ours,
+        with target day on or after `since` (YYYY-MM-DD; None: all). Callers fetch each one."""
         subs = {
             s["market_session_challenge"] for s in self._get("market/challenge/submission")["data"]
         }
-        # ponytail: lists every challenge ever and callers fetch each; add a date cursor if slow
+        # ponytail: the two list calls still return every challenge ever (one request each);
+        # filtered here because no server-side date filter is documented
         challenges = self._get("market/challenge", resource_name=resource_name)["data"]
-        return [c for c in challenges if c["id"] in subs]
+        return [
+            c
+            for c in challenges
+            if c["id"] in subs and (since is None or str(c["target_day"])[:10] >= since)
+        ]
 
     def submitted_forecasts(self, challenges: list[dict]) -> pd.DataFrame:
         """What Predico registered as our session submissions: q10/q50/q90 on a UTC index."""
