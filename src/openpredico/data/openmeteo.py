@@ -129,9 +129,31 @@ def run_time(day: pd.Timestamp, area: str = "land") -> pd.Timestamp:
     return run - RUN_SHIFT.get(area, pd.Timedelta(0))
 
 
+def fetch_run(run: pd.Timestamp, area: str, forecast_days: int = 3) -> pd.DataFrame:
+    """Hourly VARIABLES of one run of the area's model, every hour it covers, mean per area.
+
+    Raises HTTPError 400 when the run isn't archived.
+    """
+    frames = _get(POINTS[area], AREA_MODEL.get(area, MODEL), run, forecast_days, area)
+    return _mean(area, frames).dropna(how="all")
+
+
 def _run(day: pd.Timestamp, areas: list[str]) -> dict[str, pd.DataFrame]:
     """Hourly forecasts of the areas' run for the hours of local `day`, mean per area."""
     points = [p for a in areas for p in POINTS[a]]
+    run = run_time(day, areas[0])
+    frames = _get(points, AREA_MODEL.get(areas[0], MODEL), run, 3, f"{areas[0]} {day:%Y-%m-%d}")
+    out, i = {}, 0
+    lo, hi = day.tz_convert("UTC"), (day + pd.DateOffset(days=1)).tz_convert("UTC")
+    for area in areas:
+        n = len(POINTS[area])
+        out[area] = _mean(area, [f[(f.index >= lo) & (f.index < hi)] for f in frames[i : i + n]])
+        i += n
+    return out
+
+
+def _get(points, model: str, run: pd.Timestamp, forecast_days: int, label: str):
+    """Hourly VARIABLES per point of one run (UTC; radiation shifted to the hour it starts)."""
     started = time.time()
     resp = _session.get(
         BASE_URL,
@@ -139,32 +161,30 @@ def _run(day: pd.Timestamp, areas: list[str]) -> dict[str, pd.DataFrame]:
             "latitude": ",".join(str(p[0]) for p in points),
             "longitude": ",".join(str(p[1]) for p in points),
             "hourly": ",".join(VARIABLES),
-            "models": AREA_MODEL.get(areas[0], MODEL),
-            "run": f"{run_time(day, areas[0]):%Y-%m-%dT%H:%M}",
-            "forecast_days": 3,  # covers the local target day, plus an hour
+            "models": model,
+            "run": f"{run:%Y-%m-%dT%H:%M}",
+            "forecast_days": forecast_days,  # from 00 UTC of the run's day
             "timezone": "GMT",
             "wind_speed_unit": "ms",
         },
         timeout=60,
     )
     if (took := time.time() - started) > 20:  # retries are silent otherwise
-        print(f"openmeteo {areas[0]} {day:%Y-%m-%d}: {took:.0f} s, HTTP {resp.status_code}")
+        print(f"openmeteo {label}: {took:.0f} s, HTTP {resp.status_code}")
     resp.raise_for_status()
     locations = resp.json()
-    locations = locations if isinstance(locations, list) else [locations]
-    out, i = {}, 0
-    lo, hi = day.tz_convert("UTC"), (day + pd.DateOffset(days=1)).tz_convert("UTC")
-    for area in areas:
-        ps, frames = POINTS[area], []
-        for loc in locations[i : i + len(ps)]:
-            df = pd.DataFrame(loc["hourly"])
-            df.index = pd.to_datetime(df.pop("time"), utc=True)
-            for v in PRECEDING_HOUR & set(df):  # the 10:00 value is the 09:00-10:00 mean
-                df[v] = df[v].shift(-1)
-            frames.append(df[(df.index >= lo) & (df.index < hi)])
-        if w := WEIGHTS.get(area):
-            out[area] = sum(f * k for f, k in zip(frames, w, strict=True)) / sum(w)
-        else:
-            out[area] = pd.concat(frames).groupby(level=0).mean()
-        i += len(ps)
-    return out
+    frames = []
+    for loc in locations if isinstance(locations, list) else [locations]:
+        df = pd.DataFrame(loc["hourly"])
+        df.index = pd.to_datetime(df.pop("time"), utc=True)
+        for v in PRECEDING_HOUR & set(df):  # the 10:00 value is the 09:00-10:00 mean
+            df[v] = df[v].shift(-1)
+        frames.append(df)
+    return frames
+
+
+def _mean(area: str, frames: list[pd.DataFrame]) -> pd.DataFrame:
+    """The area's points averaged: weighted by WEIGHTS if any, else plain."""
+    if w := WEIGHTS.get(area):
+        return sum(f * k for f, k in zip(frames, w, strict=True)) / sum(w)
+    return pd.concat(frames).groupby(level=0).mean()
