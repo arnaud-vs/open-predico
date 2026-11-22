@@ -31,7 +31,7 @@ from huggingface_hub import HfApi
 from openpredico.config import live_targets
 from openpredico.data import hf
 from openpredico.data.groups import build, fetch_source, load_groups
-from openpredico.evaluation.backtest import PUBLICATION_LAG
+from openpredico.evaluation.backtest import LAGS, PUBLICATION_LAG
 from openpredico.evaluation.experiment import TARGET_COLUMNS, tso_forecast
 from openpredico.live.predico import Predico
 from openpredico.live.submit import CONFIG
@@ -76,6 +76,49 @@ def runs_to_read(stamps: list[pd.Timestamp], start, tz: str, gate: str, now: pd.
     return picked - {None}
 
 
+def _stamp(f: str) -> pd.Timestamp:
+    """Run time from a run file name (`.../2026-11-22T0915Z.parquet`)."""
+    name = f.rsplit("/", 1)[1].removesuffix(".parquet")
+    return pd.Timestamp(datetime.strptime(name, "%Y-%m-%dT%H%MZ"), tz="UTC")
+
+
+def freshest(runs: dict[pd.Timestamp, pd.DataFrame], now: pd.Timestamp) -> pd.DataFrame:
+    """Intraday: per quarter-hour t, the latest run before t's own hourly gate (t floored to the
+    hour), once that gate passed. Predico's lead-0 slot: what Elia's most recent forecast
+    competes with."""
+    df = pd.concat([fc.assign(run=run) for run, fc in runs.items()])
+    gate = df.index.floor("h")
+    df = df[(df.run.to_numpy() < gate) & (gate <= now)].sort_values("run", kind="stable")
+    return df[~df.index.duplicated(keep="last")].sort_index()
+
+
+def intraday(name: str, files: list[str], truth: pd.Series, lag, now: pd.Timestamp) -> None:
+    """`intraday/<target>.parquet`: per quarter-hour our freshest forecast (`freshest`), its run
+    and obs. Only the last day of gates is recomputed (runs from 3 h before it are read); earlier
+    rows stay as published, their obs refreshed from `truth`."""
+    prev = _published(f"intraday/{name}.parquet")
+    since = None if prev is None else now.floor("h") - pd.Timedelta(days=1)
+    first = None if since is None else since - pd.Timedelta(hours=3)
+    paths = {
+        _stamp(f): f
+        for f in files
+        if f.startswith((f"forecasts/{name}/", f"intraday/forecasts/{name}/"))
+    }
+    runs = {
+        run: hf.download("live-private", f)[["q10", "q50", "q90"]]
+        for run, f in paths.items()
+        if first is None or run >= first
+    }
+    new = freshest(runs, now) if runs else pd.DataFrame()
+    if new.empty:
+        return
+    if prev is not None:
+        new = pd.concat([prev[prev.index < since], new[new.index >= since]])
+    obs = truth.reindex(new.index).where(new.index < now - lag)
+    new["obs"] = obs.combine_first(new["obs"]) if "obs" in new else obs
+    hf.upload(new, "live", f"intraday/{name}.parquet", f"Publish {name} intraday {now:%Y-%m-%d}")
+
+
 def _published(path: str) -> pd.DataFrame | None:
     try:
         return hf.download("live", path)
@@ -96,14 +139,8 @@ def main(full: bool = False) -> None:
         if prev is not None:
             prev.index = prev.index.as_unit("us")
         start = window_start(None if prev is None else prev.index, tz, now)
-        paths = {
-            pd.Timestamp(
-                datetime.strptime(f.rsplit("/", 1)[1].removesuffix(".parquet"), "%Y-%m-%dT%H%MZ"),
-                tz="UTC",
-            ): f
-            for f in files
-            if f.startswith(f"forecasts/{name}/")
-        }
+        paths = {_stamp(f): f for f in files if f.startswith(f"forecasts/{name}/")}
+        lag = LAGS.get(TARGET_COLUMNS[name], PUBLICATION_LAG)
         known = set() if old_runs is None else set(old_runs.run[old_runs.target == name])
         need = runs_to_read(list(paths), start, tz, t["gate"], now) if paths else set()
         runs, rows = {}, []
@@ -126,7 +163,7 @@ def main(full: bool = False) -> None:
             if run in need:
                 y = inputs[TARGET_COLUMNS[name]]
                 days = pd.DatetimeIndex(fc.index.tz_convert(tz).normalize().unique())
-                base = slot_climatology(y[y.index < run - PUBLICATION_LAG], days, tz=tz)
+                base = slot_climatology(y[y.index < run - lag], days, tz=tz)
                 fc[["b10", "b50", "b90"]] = base.reindex(fc.index).to_numpy()
                 runs[run] = fc
         print(f"{name}: read {len(runs)} sliced and {len(rows)} new of {len(paths)} runs")
@@ -147,7 +184,7 @@ def main(full: bool = False) -> None:
             continue  # nothing newly gated: what is published stays
         begin = (out.index.min() if start is None else start).tz_convert("UTC")
         truth = fetch_source(t["truth"], *(x.tz_localize(None).isoformat() for x in (begin, now)))
-        measured = out.index < now - PUBLICATION_LAG
+        measured = out.index < now - lag
         obs = truth.reindex(out.index)
         if t["unit"] == "MWh":
             obs[measured] = obs[measured].fillna(0)  # missing = no activation (PLAN.md)
@@ -177,6 +214,8 @@ def main(full: bool = False) -> None:
         hf.upload(scores, "live", f"scores/{name}.parquet", f"Scores {name}")
         days = out.index.tz_convert(tz).normalize()
         print(f"{name}: {days.nunique()} days, {days[out.s50.notna()].nunique()} registered")
+        if t.get("intraday"):
+            intraday(name, files, truth, lag, now)
     if run_rows:  # new runs since the last publish
         runs_df = pd.concat([old_runs, pd.DataFrame(run_rows)], ignore_index=True)
         hf.upload(runs_df, "live", "runs.parquet", f"Runs {now:%Y-%m-%d}")

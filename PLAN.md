@@ -210,11 +210,13 @@ published faster than the 2 h `PUBLICATION_LAG` set their own `lag` in groups.to
   the next 24 h) and fills its slots with our latest submission. `intraday = true` in
   targets.toml: `tick` submits every hour at :15 (retries :30/:45), t0 from now through the end
   of D+1 (the 09:15 run is the D+1 one), climatology after. The weather stays the D-1 runs; a
-  fresher run needs a backtest first. Before ~07 UTC the D+1 runs aren't out: those runs keep
-  the weather with NaN on D+1 (t0 masks it) and drop only a model missing on today's remaining
-  steps; in the D+1 session hour a model missing on D+1 is dropped as before. Runs outside the
-  D+1 session hour go to `live-private/intraday/`, so `publish` (which reads `forecasts/`) is
-  unchanged. Not backtested intraday: the backtest covers the 09:00 D-1 origin only.
+  fresher run needs a backtest first. Before ~07 UTC the D-1 runs of D+1 aren't out: those
+  runs take D+1 from the run a day older (`submit.older_run`, live only, never archived; IFS
+  and AIFS reach all of D+1, ICON-D2 and KNMI don't), and a model still missing steps through
+  D+1 is left out (t0 never gets NaN known-future inputs). Runs outside the D+1 session hour go
+  to `live-private/intraday/`; `publish` writes `live/intraday/<target>.parquet`: per
+  quarter-hour our freshest forecast (latest run before its hourly gate, Predico's lead-0
+  slot) and obs. Not backtested intraday: the backtest covers the 09:00 D-1 origin only.
 - **Open-Meteo:** with the archive, a run fetches only days not archived yet: one request per
   missing model-day (11 points each), so ~44 calls per run while the D+1 runs are pending
   (hours 00-07) and 0 after; ~400 calls a day, far under the free tier (5000/h).

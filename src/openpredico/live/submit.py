@@ -12,11 +12,12 @@ import time
 from collections.abc import Callable
 
 import pandas as pd
+import requests
 from huggingface_hub import HfApi
 from huggingface_hub.errors import RemoteEntryNotFoundError
 
 from openpredico.config import live_targets
-from openpredico.data import hf
+from openpredico.data import hf, openmeteo
 from openpredico.data.groups import build, load_groups
 from openpredico.evaluation.backtest import clip, cut_past
 from openpredico.evaluation.experiment import CATEGORICAL, features, load_benchmark
@@ -95,7 +96,29 @@ def archived(g: str, start: pd.Timestamp, end: pd.Timestamp, tz: str, save: bool
         msg = f"Archive {g}: through {reached:%Y-%m-%d}"
         hf.upload(merged, "benchmark", ARCHIVE.format(g), msg)
     grid = pd.date_range(start, end, freq="15min", inclusive="left", name="time")
-    return merged.reindex(grid)
+    out = merged.reindex(grid)
+    sources = {c: d["source"] for c, d in columns.items()}
+    if all(s.startswith("openmeteo:") for s in sources.values()) and out.iloc[-1].isna().all():
+        out = out.fillna(older_run(sources, out.index, tz))  # never saved to the archive
+    return out
+
+
+def older_run(sources: dict[str, str], grid: pd.DatetimeIndex, tz: str) -> pd.DataFrame:
+    """Night runs, before the D-1 run of D+1 lands: D+1 from the run a day older, where it
+    reaches (IFS/AIFS do; ICON-D2's 48 h and KNMI's 60 h don't cover all of D+1).
+    ponytail: older vintage than the backtest saw; live only, never archived."""
+    day = grid[-1].tz_convert(tz).normalize()
+    out, runs = pd.DataFrame(index=grid), {}
+    for c, s in sources.items():
+        area, variable = s.removeprefix("openmeteo:").split(".")
+        if area not in runs:
+            run = openmeteo.run_time(day, area) - pd.Timedelta(days=1)
+            try:
+                runs[area] = openmeteo.fetch_run(run, area).reindex(grid, method="ffill", limit=3)
+            except requests.HTTPError:
+                runs[area] = pd.DataFrame(index=grid)
+        out[c] = runs[area].get(variable)
+    return out
 
 
 def frontier(df: pd.DataFrame, columns: dict, tz: str) -> pd.Timestamp | None:
@@ -133,12 +156,11 @@ def forecast(
     stop = (days[0] + pd.DateOffset(days=1)).tz_convert("UTC")
     past = cut_past(history, now)
     future = history.loc[history.index < stop, future_cols]
-    # Known-future columns are needed on D+1; intraday runs need them on the rest of today, and
-    # on D+1 only in its session hour (its gate counts): earlier, D+1 weather isn't out yet (the
-    # D-1 run of D+1 lands ~07 UTC) and t0 gets those gaps as NaN (it masks them).
-    # ponytail: the backtest never saw NaN known-future inputs; later runs replace those steps.
+    # Known-future columns are needed on D+1, and for intraday runs also on the rest of today. A
+    # model still missing steps (before its D-1 run lands, `archived` fills D+1 from the run a
+    # day older where that run reaches) is left out: t0 never gets NaN known-future inputs.
     intraday = t.get("intraday", False)
-    lo, hi = (now, stop if d1_session(t, now) else days[0]) if intraday else (days[0], stop)
+    lo, hi = (now if intraday else days[0]), stop
     needed = (future.index >= lo) & (future.index < hi)
     late = [c for c in future_cols if future.loc[needed, c].isna().any()]
     if late:  # left out rather than filled: TSFMs take any covariate set

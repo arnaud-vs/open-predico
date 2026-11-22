@@ -1,6 +1,6 @@
 import pandas as pd
 
-from openpredico.live.publish import scored
+from openpredico.live.publish import freshest, scored
 
 TZ = "Europe/Madrid"
 
@@ -49,3 +49,15 @@ def test_incremental_window_reads_only_the_runs_predico_sliced():
     got = runs_to_read(stamps, start, TZ, "17:00", now)
     lo, hi = pd.Timestamp("2026-11-12", tz="UTC"), pd.Timestamp("2026-11-20 16:00", tz="UTC")
     assert got == {s for s in stamps if lo <= s < hi}  # Nov 13..21 from the Nov 12..20 runs
+
+
+def test_freshest_takes_latest_run_before_each_hourly_gate():
+    idx = pd.date_range("2026-11-22 10:00", periods=12, freq="15min", tz="UTC")
+    runs = {
+        pd.Timestamp(f"2026-11-22 {h}:15", tz="UTC"): pd.DataFrame({"q50": h}, idx)
+        for h in (9, 10, 11)
+    }
+    out = freshest(runs, pd.Timestamp("2026-11-22 12:05", tz="UTC"))
+    assert out.loc["2026-11-22 10:45", "q50"] == 9  # gate 10:00: the 09:15 run
+    assert out.loc["2026-11-22 11:00", "q50"] == 10  # gate 11:00: the 10:15 run
+    assert out.index.max() == pd.Timestamp("2026-11-22 12:45", tz="UTC")  # gate 12:00 passed

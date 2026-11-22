@@ -1,5 +1,7 @@
 import pandas as pd
+import requests
 
+from openpredico.live import submit
 from openpredico.live.submit import forecast, validate
 
 
@@ -72,12 +74,12 @@ def _intraday_predict(seen):
     return predict
 
 
-def test_intraday_forecast_starts_now_and_keeps_weather_missing_only_on_d1():
+def test_intraday_forecast_starts_now_and_drops_weather_missing_on_d1():
     now = pd.Timestamp("2026-11-15 00:20", tz="UTC")  # Belgium 01:20: D+1 runs not out yet
     idx = pd.date_range("2026-08-01", "2026-11-18", freq="15min", tz="UTC", inclusive="left")
     weather = pd.DataFrame({"ghi_be": 1.0, "ghi_be_knmi": 1.0}, index=idx)
-    weather.loc[weather.index >= "2026-11-15 23:00"] = None  # D+1 (16 Nov) runs missing
-    weather.loc["2026-11-15 12:00", "ghi_be_knmi"] = None  # KNMI also missing a step today
+    weather.loc[weather.index >= "2026-11-15 23:00", "ghi_be_knmi"] = None  # KNMI misses D+1
+    weather.loc["2026-11-15 12:00", "ghi_be"] = None  # IFS misses a step today
     frames = {
         "target_elia": pd.DataFrame({"solar_be": 5.0}, index=idx),
         "weather_be": weather[["ghi_be"]],
@@ -86,7 +88,7 @@ def test_intraday_forecast_starts_now_and_keeps_weather_missing_only_on_d1():
     seen = {}
     fc, _ = forecast("belgium_solar_opendata_elia", frames, _intraday_predict(seen), now)
     validate(fc, now)
-    assert seen["future"] == ["ghi_be"]  # kept with NaN on D+1; KNMI left out: gap today
+    assert seen["future"] == []  # both left out: no NaN known-future inputs reach t0
     assert seen["past_end"] == pd.Timestamp("2026-11-14 23:45", tz="UTC")  # 30 min Elia lag
     assert fc.index[0] == pd.Timestamp("2026-11-15 00:30", tz="UTC")  # from now on
     assert (fc.loc[:"2026-11-16 22:45", "model"] == "t0gamma_cov_ctx90").all()
@@ -164,3 +166,29 @@ def test_archived_raises_on_hf_errors_other_than_a_missing_file(monkeypatch):
     start, end = pd.Timestamp("2026-08-20", tz="UTC"), pd.Timestamp("2026-11-22", tz="UTC")
     with pytest.raises(LocalEntryNotFoundError):
         submit.archived("weather_be", start, end, "Europe/Brussels", save=True)
+
+
+def test_older_run_fills_d1_where_the_day_older_run_reaches(monkeypatch):
+    grid = pd.date_range(
+        "2026-11-22 23:00", "2026-11-24 23:00", freq="15min", tz="UTC", inclusive="left"
+    )
+    asked = []
+
+    def fetch_run(run, area):
+        asked.append((run, area))
+        if area == "be_d2":
+            raise requests.HTTPError("no run")
+        hours = pd.date_range(run, run + pd.Timedelta(hours=60), freq="h")
+        return pd.DataFrame({"shortwave_radiation": 1.0}, index=hours)
+
+    monkeypatch.setattr(submit.openmeteo, "fetch_run", fetch_run)
+    sources = {
+        "ghi_be": "openmeteo:be.shortwave_radiation",
+        "ghi_be_d2": "openmeteo:be_d2.shortwave_radiation",
+    }
+    out = submit.older_run(sources, grid, "Europe/Brussels")
+    # D+1 = 24 Nov: IFS run of 23 Nov 00 UTC minus a day = 22 Nov 00 UTC, reaching 24 Nov 12 UTC
+    assert asked[0] == (pd.Timestamp("2026-11-22", tz="UTC"), "be")
+    assert out.loc["2026-11-24 12:00", "ghi_be"] == 1.0
+    assert out.loc["2026-11-24 13:15":, "ghi_be"].isna().all()
+    assert out["ghi_be_d2"].isna().all()
