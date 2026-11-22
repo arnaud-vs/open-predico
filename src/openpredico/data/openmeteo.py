@@ -69,6 +69,16 @@ AREA_MODEL = {  # else MODEL
     "be_knmi": "knmi_harmonie_arome_netherlands",
     "be_aifs": "ecmwf_aifs025_single",
 }
+# Per model: hours between the runs the Single Runs API archives, and how long after init a run
+# is there (the figures above; IFS's own 00 UTC run landed ~06:40 UTC). Shown on the dashboard.
+CYCLE = {"ecmwf_ifs": 6, "ecmwf_aifs025_single": 6, "icon_d2": 3}
+CYCLE["knmi_harmonie_arome_netherlands"] = 3  # hourly runs, archived every 3 h
+LATENCY = {
+    "ecmwf_ifs": pd.Timedelta("6h40min"),
+    "ecmwf_aifs025_single": pd.Timedelta("5h38min"),
+    "icon_d2": pd.Timedelta("1h55min"),
+    "knmi_harmonie_arome_netherlands": pd.Timedelta("2h36min"),
+}
 VARIABLES = [
     "wind_speed_100m",
     "wind_speed_10m",

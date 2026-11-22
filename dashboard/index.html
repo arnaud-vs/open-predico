@@ -115,8 +115,11 @@ tr.m3 td { box-shadow: inset 0 0 0 9999px color-mix(in srgb, var(--bronze) 9%, t
 .bar-sub .bar-in { min-height: 46px; gap: 10px; }
 .bar-sub .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-soft); }
 .markets { display: flex; gap: 6px; overflow-x: auto; padding-block: 7px; scrollbar-width: none; }
-.markets button { white-space: nowrap; display: inline-flex; gap: 6px; align-items: center; }
-.markets small { font-size: 10px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.05em; }
+.markets .chip { white-space: nowrap; font-family: var(--sans); font-size: 13px; text-decoration: none; padding: 4px 11px; }
+.chip[aria-current="page"] { border-color: var(--accent); color: var(--ink); background: var(--accent-wash); }
+.sections { margin-left: auto; }
+.sections a { padding: 12px 8px 10px; font-size: 13px; white-space: nowrap; }
+.legend-i { display: inline-flex; align-items: center; gap: 7px; }
 .soon { display: grid; gap: 10px; justify-items: start; padding: 28px 24px; }
 .soon dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; font-size: 13px; }
 .soon dt { color: var(--ink-soft); } .soon dd { margin: 0; font-family: var(--mono); }
@@ -165,20 +168,15 @@ canvas.scatter { width: 100%; height: 360px; display: block; }
 <body>
 <header class="bar">
   <div class="bar-in">
-    <a class="brand" href="#live"><i></i>open-predico</a>
-    <nav aria-label="Sections">
-      <a href="#live">Live</a>
-      <a href="#backtest">Backtest</a>
-      <a href="#target">Target data</a>
-      <a href="#inputs">Input features</a>
-    </nav>
+    <a class="brand" href="#"><i></i>open-predico</a>
+    <nav aria-label="Countries" id="countries"></nav>
     <div class="links">
       <a href="https://github.com/arnaud-vs/open-predico" target="_blank" rel="noopener">Code</a>
       <a href="https://huggingface.co/datasets/open-predico/benchmark" target="_blank" rel="noopener">Data</a>
       <a href="https://predico.inesctec.pt/docs/" target="_blank" rel="noopener">Predico</a>
     </div>
   </div>
-  <div class="bar-sub"><div class="bar-in"><span class="k">Target</span><div class="markets" id="markets" role="group" aria-label="Target"></div></div></div>
+  <div class="bar-sub"><div class="bar-in"><div class="markets" id="vars" role="navigation" aria-label="Variable"></div><nav class="sections" id="sections" aria-label="Sections"></nav></div></div>
 </header>
 <main>
   <section data-tab="live" id="tab-live"><p class="empty">Loading…</p></section>

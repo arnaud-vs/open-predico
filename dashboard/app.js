@@ -169,8 +169,12 @@ function onSeg(root, id, fn) {
     fn(b.dataset.v);
   });
 }
-// The selected market (MARKETS, below) and its targets' short names (build.py SHORT).
-const mk = () => MARKETS.find(m => m.id === market);
+// The selected country and variable (COUNTRIES, below), merged: id = its data key (build.py
+// MARKETS), name = "Spain mFRR energy", resources = [its Predico resource].
+const mk = () => {
+  const c = COUNTRIES.find(x => x.id === sel.c), v = c.vars.find(x => x.id === sel.v);
+  return { ...c, ...v, c: c.id, v: v.id, id: v.data ?? c.data, name: `${c.name} ${v.name}`, resources: [v.resource] };
+};
 const shortsOf = (m, meta) => m.resources.map(r => meta.short[r]);
 const targetSeg = (id, shorts, value) => (shorts.length > 1 ? seg(id, shorts.map(t => [t, LABEL[t]]), value) : "");
 const kpi = (k, v, d = "", cls = "") => `<div class="kpi"><span class="k">${esc(k)}</span><span class="v">${v}</span><span class="d ${cls}">${d}</span></div>`;
@@ -507,7 +511,7 @@ async function renderBacktest(root) {
 
   // Day viewer
   let dvT = t0;
-  const target = await json(`target/${market}.json`);
+  const target = await json(`target/${mk().id}.json`);
   const off = (meta.start - target.start) / STEP;
   const x = Array.from({ length: meta.n }, (_, i) => meta.start + i * STEP);
   const dayIdx = new Map();
@@ -560,7 +564,7 @@ function rebuild(c) { c.inst?.destroy(); c.inst = c.build(); }
 
 // --- Target data -------------------------------------------------------------------------
 async function renderTarget(root) {
-  const [target, meta] = await Promise.all([json(`target/${market}.json`), json("meta.json")]);
+  const [target, meta] = await Promise.all([json(`target/${mk().id}.json`), json("meta.json")]);
   const mkt = mk(), shorts = shortsOf(mkt, meta), scatter = "price" in target;
   const n = target[shorts[0]].length, x = Array.from({ length: n }, (_, i) => target.start + i * STEP);
   const cal = x.map(madrid);
@@ -728,11 +732,13 @@ async function liveFeatures(m) {
 async function renderFeatures(root) {
   const m = mk(), rows = (await json("features.json"))[m.id], used = await liveFeatures(m);
   const geo = (await json("geo.json").catch(() => ({})))[m.id];
+  const wx = (await json("weather.json").catch(() => ({})))[m.id];
   root.innerHTML = `
     <div class="head"><div><h1>Input features</h1><p class="lede">The columns the ${esc(m.name)} models see, one line each in <span class="mono">configs/groups.toml</span>. Availability <b>future</b> = known for the target day before the gate, <b>past</b> = only known up to the forecast origin. <b>Live</b> marks the columns the latest live run used.</p></div></div>
     ${geo ? `<div class="card"><div class="card-head"><div><h2>Weather sampling</h2><p class="sub">${geo.sets.map(s => `${s.points.length} points (${s.weighted ? "weighted by PV capacity; dot size = weight" : "plain mean"}): ${s.runs.join(" and ")} run of D-1`).join(" · ")}. Outline: ${esc(geo.label)}.</p></div></div>
       <div class="map" id="ft-map" role="img" aria-label="Map of the weather points"></div>
       <p class="sub">Boundaries: ${esc(geo.credit)}. Map: © OpenStreetMap contributors.</p></div>` : ""}
+    ${wx ? weatherTimeline(wx, m) : ""}
     <div class="card"><div class="card-head"><div><h2>Feature columns</h2><p class="sub">${rows.length} columns · ${rows.filter(r => used.has(r.column)).length} in the latest live run</p></div></div>
       <div class="tablewrap"><table><thead><tr><th>Live</th><th>Group</th><th>Column</th><th>Source</th><th>Availability</th><th>Description</th></tr></thead><tbody>${rows.map(r =>
         `<tr><td>${used.has(r.column) ? '<span class="pill">live</span>' : ""}</td><td class="mono">${esc(r.group)}</td><td class="mono">${esc(r.column)}</td><td class="mono">${esc(r.source)}</td><td>${esc(r.availability)}</td><td class="desc">${esc(r.description)}</td></tr>`).join("")}</tbody></table></div></div>`;
@@ -758,53 +764,131 @@ function drawMap(el, geo) {
   }
 }
 
-// --- Targets (Predico resources) --------------------------------------------------------
-// live: wired (data, backtest, live run). city/gateLocal/source/missingTruth/about: tab texts.
-const de50Hertz = what => (from, to) => `The truth series from <span class="mono">v2/target_50hertz.parquet</span>: ENTSO-E actual generation, ${what}, 50Hertz control area, MW (mean per quarter-hour), 15-min, ${from} – ${to}. As Predico does, points the curve omits repeat the previous value (curve type A03), each series before summing.`;
-const DE = { program: "50Hertz", gate: "15:00 CET, D-1", live: true, city: "Berlin", gateLocal: "15:00 Berlin on D-1", source: "ENTSO-E", missingTruth: "" };
-const MARKETS = [
-  { id: "es-mfrr", name: "Spain mFRR", note: "energy & price", program: "EDP", gate: "17:00 CET, D-1", resources: ["spain_mfrr_energy", "spain_mfrr_price"], truth: "ESIOS (REE)", live: true, catalog: true,
-    city: "Madrid", gateLocal: "17:00 Madrid on D-1", source: "ESIOS", missingTruth: "Quarter-hours without truth (no mFRR activation, so no price) are left out.",
-    about: (from, to) => `The truth series from <span class="mono">v1/target.parquet</span>: mFRR activated <b>energy</b> (net, MWh per quarter-hour, upward positive) and mFRR <b>price</b> (EUR/MWh), Spain, 15-min, ${from} – ${to}. Missing energy is filled with 0 (no activation); missing price stays empty. No data during the Iberian blackout (28 Apr – 6 May 2025). Prices rise from Jul 2026 (monthly mean ~100 → ~157 EUR/MWh).` },
-  { id: "be-solar", name: "Belgium solar", program: "Elia", gate: "10:00 CET, D-1 (plus hourly intraday)", resources: ["belgium_solar_opendata_elia"], truth: "Elia Open Data, Belgium total", live: true,
-    city: "Brussels", gateLocal: "10:00 Brussels on D-1", source: "Elia", missingTruth: "",
-    about: (from, to) => `The truth series from <span class="mono">target_elia.parquet</span>: Elia's measured PV generation, Belgium total (TSO + DSO connected), MW (mean per quarter-hour), 15-min, ${from} – ${to}. Elia dataset ods032 up to 25 Oct 2026, then ods209 (and ods210 for the latest hours), as Predico scores it.` },
-  { id: "de-solar", name: "Germany solar", note: "50Hertz", resources: ["germany_solar_50hertz_ca"], truth: "ENTSO-E A75 B16, 50Hertz control area", about: de50Hertz("solar (A75 B16)"), ...DE },
-  { id: "de-wind", name: "Germany wind", note: "50Hertz", resources: ["germany_wind_50hertz_ca"], truth: "ENTSO-E A75 B18 + B19, 50Hertz control area", about: de50Hertz("wind offshore + onshore (A75 B18 + B19)"), ...DE },
-];
-let market = (() => { try { return MARKETS.find(m => m.id === localStorage.getItem("market"))?.id ?? "es-mfrr"; } catch { return "es-mfrr"; } })();
-const TAB_NAMES = { live: "Live forecasts", backtest: "Backtest", target: "Target data", inputs: "Input features" };
-function comingSoon(root, tab) {
-  const m = MARKETS.find(x => x.id === market);
-  root.innerHTML = `<div class="head"><div><h1>${esc(TAB_NAMES[tab])}: ${esc(m.name)}</h1></div></div>
-    <div class="card soon"><span class="pill muted">coming soon</span>
-      <p class="lede">${esc(m.name)} is a Predico target we plan to forecast next. Its data, backtest and live submissions are not wired up yet.</p>
-      <dl><dt>Predico resource</dt><dd>${m.resources.map(esc).join(", ")}</dd><dt>Program</dt><dd>${esc(m.program)}</dd><dt>Gate</dt><dd>${esc(m.gate)}</dd><dt>Truth</dt><dd>${esc(m.truth)}</dd></dl>
-      <p class="sub">Want to help? See <a href="https://github.com/arnaud-vs/open-predico/blob/main/PLAN.md#adding-a-target" target="_blank" rel="noopener">Adding a target</a> in the plan.</p></div>`;
+// --- Weather runs timeline (Input features, targets that read Open-Meteo) -------------------
+// One row per weather model: each archived run as a bar from init to when it is on the API
+// (openmeteo.LATENCY), the run we read highlighted; origin, submit and gate as vertical lines.
+// Intraday: the target day, no chosen run yet, a gate every hour.
+function weatherTimeline(w, m) {
+  const intraday = !!m.intraday, H = 3600, OTHER = "color-mix(in srgb, var(--ink-soft) 40%, transparent)";
+  const t0 = intraday ? w.day_start : Math.min(...w.models.map(r => r.used)) - 6 * H;
+  const t1 = intraday ? w.day_end : w.gate + 2 * H;
+  const L = 150, R = 12, W = 900, rowH = 30, top = 22, n = w.models.length, plotH = n * rowH, Hh = top + plotH + 30;
+  const X = s => L + ((s - t0) / (t1 - t0)) * (W - L - R);
+  const hm = s => { const d = new Date(s * 1000); return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`; };
+  const local = new Intl.DateTimeFormat("en-GB", { timeZone: m.tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  const loc = s => local.format(new Date(s * 1000));
+  const dur = s => `${Math.floor(s / H)}h${pad(Math.round((s % H) / 60))}`;
+  let svg = "";
+  for (let s = Math.ceil(t0 / (3 * H)) * 3 * H; s <= t1; s += 3 * H) {  // grid every 3 h
+    const d = new Date(s * 1000), mid = !d.getUTCHours();
+    svg += `<line x1="${X(s)}" x2="${X(s)}" y1="${top}" y2="${top + plotH}" style="stroke:var(--grid)"/>`;
+    svg += `<text x="${X(s)}" y="${top + plotH + 14}" text-anchor="middle" style="fill:var(--ink-soft)">${hm(s)}</text>`;
+    if (mid) svg += `<text x="${X(s)}" y="${top + plotH + 27}" text-anchor="middle" style="fill:var(--ink-soft)">${d.getUTCDate()} ${MON[d.getUTCMonth()]}</text>`;
+  }
+  w.models.forEach((r, i) => {
+    const y = top + i * rowH + rowH / 2;
+    svg += `<text x="${L - 10}" y="${y + 4}" text-anchor="end" style="fill:var(--ink);font-family:var(--sans)">${esc(r.name)}</text>`;
+    const inits = [];
+    for (let s = Math.floor((t0 - r.latency) / r.cycle) * r.cycle; s < t1; s += r.cycle) inits.push(s);
+    inits.sort((p, q) => (p === r.used) - (q === r.used));  // the run we read drawn last, on top
+    for (const s of inits) {
+      const a = Math.max(s, t0), b = Math.min(s + r.latency, t1), used = !intraday && s === r.used;
+      if (b <= a) continue;
+      const title = `${r.name} ${hm(s)} UTC run: on Open-Meteo ~${hm(s + r.latency)} UTC (${dur(r.latency)} after init)${used ? ", the run we read" : ""}`;
+      svg += `<g><title>${esc(title)}</title><rect x="${X(a)}" y="${y - (used ? 5 : 3)}" width="${Math.max(2, X(b) - X(a))}" height="${used ? 10 : 6}" rx="${used ? 4 : 3}" style="fill:${used ? "var(--accent-ink)" : OTHER};stroke:var(--surface);stroke-width:2"/>`;
+      if (s + r.latency <= t1) svg += `<circle cx="${X(s + r.latency)}" cy="${y}" r="${used ? 5 : 3.5}" style="fill:${used ? "var(--accent-ink)" : "var(--ink-soft)"};stroke:var(--surface);stroke-width:2"/>`;
+      svg += `<rect x="${X(a)}" y="${y - rowH / 2}" width="${Math.max(8, X(b) - X(a))}" height="${rowH}" fill="transparent"/></g>`;
+    }
+  });
+  const vline = (s, color, dash, label) =>
+    `<g><title>${esc(label)}</title><line x1="${X(s)}" x2="${X(s)}" y1="${top - 6}" y2="${top + plotH}" style="stroke:${color};stroke-width:2${dash ? `;stroke-dasharray:${dash}` : ""}"/></g>`;
+  if (intraday) for (let s = Math.ceil(t0 / H) * H; s < t1; s += H) svg += vline(s, "var(--ink-soft)", "2 3", `Hourly intraday gate ${loc(s)} ${m.city}`);
+  else {
+    svg += vline(w.origin, "var(--base)", "6 4", `Origin ${loc(w.origin)} ${m.city} (${hm(w.origin)} UTC)`);
+    svg += vline(w.submit, "var(--cont)", "2 3", `Live run ${loc(w.submit)} ${m.city} (${hm(w.submit)} UTC)`);
+    svg += vline(w.gate, "var(--ink)", "", `Predico gate ${loc(w.gate)} ${m.city} (${hm(w.gate)} UTC)`);
+  }
+  const legend = intraday
+    ? `<span class="legend-i"><span class="sw" style="border-color:${OTHER};border-top-width:6px"></span>run: init → on Open-Meteo</span><span class="legend-i"><span class="sw dot" style="border-color:var(--ink-soft)"></span>hourly intraday gates</span>`
+    : `<span class="legend-i"><span class="sw thick" style="border-color:var(--accent-ink)"></span>run we read</span><span class="legend-i"><span class="sw" style="border-color:${OTHER};border-top-width:6px"></span>other runs: init → on Open-Meteo</span><span class="legend-i"><span class="sw dash" style="border-color:var(--base)"></span>origin ${loc(w.origin)} ${m.city}</span><span class="legend-i"><span class="sw dot" style="border-color:var(--cont)"></span>live run ${loc(w.submit)}</span><span class="legend-i"><span class="sw" style="border-color:var(--ink)"></span>Predico gate ${loc(w.gate)} ${m.city}</span>`;
+  const rows = w.models.map(r => {
+    const runs = Array.from({ length: 24 / (r.cycle / H) }, (_, k) => pad((k * r.cycle) / H)).join(", ");
+    return `<tr><td>${esc(r.name)}</td><td class="mono">${runs}</td><td class="n">${dur(r.latency)}</td>${intraday ? `<td class="muted">not chosen yet</td>` : `<td class="mono">${hm(r.used)} UTC, ${fmtDay(new Date(r.used * 1000).toISOString().slice(0, 10))}</td><td class="n">${hm(r.used + r.latency)} UTC</td><td class="n">${dur(w.origin - r.used - r.latency)}</td>`}</tr>`;
+  }).join("");
+  return `<div class="card"><div class="card-head"><div><h2>Weather runs and gates</h2><p class="sub">${intraday
+      ? `Today (${fmtDay(w.day)}), times in UTC. Each archived run from init to when Open-Meteo serves it; Predico's intraday sessions close every hour. Which run the intraday forecasts read is not decided yet.`
+      : `For tomorrow's session (D-1 = ${fmtDay(w.day)}), times in UTC. Each archived run from init to when Open-Meteo serves it (typical delays, measured Nov 2026); the run we read is one that is out well before the ${loc(w.origin)} ${m.city} origin, the same in the backtest and live. Hover a bar for its times.`}</p></div></div>
+    <div class="chart"><svg viewBox="0 0 ${W} ${Hh}" width="100%" role="img" aria-label="Timeline of weather model runs, their availability and the gate; the table below lists the same" style="font:11px var(--mono);display:block">${svg}</svg></div>
+    <div class="legend sub">${legend}</div>
+    <div class="tablewrap"><table><thead><tr><th>Model</th><th>Runs (UTC)</th><th class="n">Out after</th><th>Run we read</th>${intraday ? "" : `<th class="n">Out at</th><th class="n">Margin to origin</th>`}</tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
-function drawMarkets() {
-  document.getElementById("markets").innerHTML = MARKETS.map(m => `<button class="chip" data-v="${m.id}" aria-pressed="${m.id === market}">${esc(m.name)}${m.live ? "" : " <small>soon</small>"}</button>`).join("");
-}
-document.getElementById("markets").addEventListener("click", e => {
-  const b = e.target.closest("button"); if (!b || b.dataset.v === market) return;
-  market = b.dataset.v;
-  try { localStorage.setItem("market", market); } catch {}
-  drawMarkets(); show();
-});
 
-// --- Routing -----------------------------------------------------------------------------
+// --- Countries and variables (Predico resources) -------------------------------------------
+// data: build.py MARKETS key (target/<data>.json, features.json, geo.json, weather.json).
+// city/tz/gateLocal/source/missingTruth/about: tab texts.
+const de50Hertz = what => (from, to) => `The truth series from <span class="mono">v2/target_50hertz.parquet</span>: ENTSO-E actual generation, ${what}, 50Hertz control area, MW (mean per quarter-hour), 15-min, ${from} – ${to}. As Predico does, points the curve omits repeat the previous value (curve type A03), each series before summing.`;
+const COUNTRIES = [
+  { id: "es", name: "Spain", program: "EDP", data: "es-mfrr", catalog: true, city: "Madrid", tz: "Europe/Madrid", gateLocal: "17:00 Madrid on D-1", source: "ESIOS",
+    missingTruth: "Quarter-hours without truth (no mFRR activation, so no price) are left out.",
+    about: (from, to) => `The truth series from <span class="mono">v1/target.parquet</span>: mFRR activated <b>energy</b> (net, MWh per quarter-hour, upward positive) and mFRR <b>price</b> (EUR/MWh), Spain, 15-min, ${from} – ${to}. Missing energy is filled with 0 (no activation); missing price stays empty. No data during the Iberian blackout (28 Apr – 6 May 2025). Prices rise from Jul 2026 (monthly mean ~100 → ~157 EUR/MWh).`,
+    vars: [{ id: "energy", name: "mFRR energy", resource: "spain_mfrr_energy" }, { id: "price", name: "mFRR price", resource: "spain_mfrr_price" }] },
+  { id: "de", name: "Germany", program: "50Hertz", city: "Berlin", tz: "Europe/Berlin", gateLocal: "15:00 Berlin on D-1", source: "ENTSO-E", missingTruth: "",
+    vars: [
+      { id: "wind", name: "Wind", resource: "germany_wind_50hertz_ca", data: "de-wind", about: de50Hertz("wind offshore + onshore (A75 B18 + B19)") },
+      { id: "solar", name: "Solar", resource: "germany_solar_50hertz_ca", data: "de-solar", about: de50Hertz("solar (A75 B16)") },
+    ] },
+  { id: "be", name: "Belgium", program: "Elia", data: "be-solar", city: "Brussels", tz: "Europe/Brussels", gateLocal: "10:00 Brussels on D-1", source: "Elia", missingTruth: "",
+    about: (from, to) => `The truth series from <span class="mono">target_elia.parquet</span>: Elia's measured PV generation, Belgium total (TSO + DSO connected), MW (mean per quarter-hour), 15-min, ${from} – ${to}. Elia dataset ods032 up to 25 Oct 2026, then ods209 (and ods210 for the latest hours), as Predico scores it. The same series scores the D+1 and the intraday sessions.`,
+    vars: [
+      { id: "solar", name: "Solar D+1", resource: "belgium_solar_opendata_elia" },
+      { id: "solar-intraday", name: "Solar intraday", resource: "belgium_solar_opendata_elia", intraday: true, gateLocal: "every hour, intraday" },
+    ] },
+];
 const TABS = { live: renderLive, backtest: renderBacktest, target: renderTarget, inputs: root => (mk().catalog ? renderInputs : renderFeatures)(root) };
+const TAB_NAMES = { live: "Live", backtest: "Backtest", target: "Target data", inputs: "Input features" };
+const saved = (() => { try { return JSON.parse(localStorage.getItem("sel")) ?? {}; } catch { return {}; } })();
+let sel = { c: "es", v: "energy", tab: "live" };
+
+// Hash: #<country>/<variable>/<section>; missing parts fall back to the last choice.
+function parseHash() {
+  const [a, b, c] = location.hash.slice(1).split("/");
+  if (TABS[a]) return { ...sel, ...saved, tab: a };  // old links: #live, #backtest, ...
+  const C = COUNTRIES.find(x => x.id === a) ?? COUNTRIES.find(x => x.id === saved.c) ?? COUNTRIES[0];
+  const V = C.vars.find(x => x.id === b) ?? C.vars.find(x => x.id === saved.v) ?? C.vars[0];
+  return { c: C.id, v: V.id, tab: TABS[c] ? c : TABS[saved.tab] ? saved.tab : "live" };
+}
+const href = (c, v, tab) => `#${c}/${v}/${tab}`;
+
+// Live and backtest of the intraday sessions: not wired yet, say so without inventing data.
+function intradaySoon(root, tab) {
+  const m = mk();
+  root.innerHTML = `<div class="head"><div><h1>${esc(TAB_NAMES[tab])}: ${esc(m.name)}</h1></div></div>
+    <div class="card soon"><span class="pill muted">being added</span>
+      <p class="lede">Predico's Elia program also runs <b>hourly intraday sessions</b> for Belgian solar, with challenges that start the same day. Our hourly intraday submissions are being added; the D+1 forecast does not cover them. ${tab === "live" ? "Their forecasts appear here after each gate, once they run." : "A backtest follows once the intraday runs exist."}</p>
+      <dl><dt>Predico resource</dt><dd>${esc(m.resource)}</dd><dt>Gates</dt><dd>every hour, intraday</dd><dt>Truth</dt><dd>Elia Open Data, Belgium total (same as D+1)</dd>
+        <dt>Benchmark</dt><dd>Elia's most recent forecast (mostrecentforecast in ods032/ods209/ods210)</dd></dl>
+      <p class="sub"><a href="${href(m.c, m.v, "target")}">Target data</a> and <a href="${href(m.c, m.v, "inputs")}">input features</a> (with the weather runs against the hourly gates) are the D+1 ones.</p></div>`;
+}
+
+function drawNav() {
+  const C = COUNTRIES.find(x => x.id === sel.c);
+  document.getElementById("countries").innerHTML = COUNTRIES.map(c => `<a href="${href(c.id, c.id === sel.c ? sel.v : c.vars[0].id, sel.tab)}"${c.id === sel.c ? ' aria-current="page"' : ""}>${esc(c.name)}</a>`).join("");
+  document.getElementById("vars").innerHTML = C.vars.map(v => `<a class="chip" href="${href(C.id, v.id, sel.tab)}"${v.id === sel.v ? ' aria-current="page"' : ""}>${esc(v.name)}</a>`).join("");
+  document.getElementById("sections").innerHTML = Object.entries(TAB_NAMES).map(([k, l]) => `<a href="${href(sel.c, sel.v, k)}"${k === sel.tab ? ' aria-current="page"' : ""}>${esc(l)}</a>`).join("");
+}
+
 function show() {
-  const tab = TABS[location.hash.slice(1)] ? location.hash.slice(1) : "live";
+  sel = parseHash();
+  try { localStorage.setItem("sel", JSON.stringify(sel)); } catch {}
+  drawNav();
+  const tab = sel.tab;
   document.querySelectorAll("section[data-tab]").forEach(s => (s.hidden = s.dataset.tab !== tab));
-  document.querySelectorAll("nav a").forEach(a => (a.getAttribute("href") === `#${tab}` ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current")));
-  const root = document.getElementById(`tab-${tab}`), key = `${market}:${tab}`;
+  const root = document.getElementById(`tab-${tab}`), key = `${sel.c}/${sel.v}`;
   if (root.dataset.key === key) return;
   root.dataset.key = key;
-  if (!mk().live) return comingSoon(root, tab);
+  if (mk().intraday && (tab === "live" || tab === "backtest")) return intradaySoon(root, tab);
   root.innerHTML = `<p class="empty">Loading…</p>`;
   TABS[tab](root).catch(e => { root.innerHTML = `<div class="card"><p class="empty">Could not load this tab: ${esc(e.message)}</p></div>`; console.error(e); });
 }
-drawMarkets();
 addEventListener("hashchange", show);
 (document.fonts?.ready ?? Promise.resolve()).then(show);
