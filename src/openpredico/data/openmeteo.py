@@ -19,8 +19,10 @@ import pandas as pd
 import requests
 from requests.adapters import HTTPAdapter, Retry
 
-# Commercial plan (Predico is commercial use): key in env, else the free tier (non-commercial).
-API_KEY = os.environ.get("OPENMETEO_API_KEY")
+# ponytail: the Standard plan key (OPENMETEO_API_KEY) doesn't cover the Single Runs API
+# (Professional and up: HTTP 403), so runs use the free tier (non-commercial) until upgraded.
+# Set API_KEY = os.environ.get("OPENMETEO_API_KEY") and the "customer-" host after an upgrade.
+API_KEY = None
 BASE_URL = f"https://{'customer-' if API_KEY else ''}single-runs-api.open-meteo.com/v1/forecast"
 logging.getLogger("urllib3").setLevel(logging.ERROR)  # retry warnings print the URL (key)
 MODEL = "ecmwf_ifs"
