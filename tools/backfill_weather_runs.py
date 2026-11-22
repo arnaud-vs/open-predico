@@ -110,6 +110,7 @@ def main():
     p.add_argument("--cache", type=Path, help="default data/archive_runs; outlive a worktree")
     p.add_argument("--status", action="store_true")
     p.add_argument("--no-upload", action="store_true")
+    p.add_argument("--hours", type=float, help="stop (and upload) after this many hours")
     a = p.parse_args()
     CACHE = a.cache or CACHE
     todo = runs(a.start, a.end)
@@ -120,7 +121,10 @@ def main():
     known = s3_available(todo)
     pause = 86400 / a.daily_calls  # seconds per call
     last_upload = time.time()
+    began = time.time()
     for i, (run, group) in enumerate(left):
+        if a.hours and time.time() - began > a.hours * 3600:
+            break  # a scheduled rerun resumes from the cache
         area = GROUPS[group][0]
         started = time.time()
         while True:
