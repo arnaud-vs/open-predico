@@ -14,7 +14,9 @@ from openpredico.live.submit import MODEL
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
-    .uv_sync(extras=["t0"])
+    # weathernext: BigQuery client (~60 MB next to torch's ~600 MB), imported only when a group
+    # reads WeatherNext; auth is keyless (weathernext.credentials, PLAN.md)
+    .uv_sync(extras=["t0", "weathernext"])
     .run_commands(
         f"python -c \"import huggingface_hub; huggingface_hub.snapshot_download('{MODEL}')\""
     )

@@ -222,8 +222,22 @@ published faster than the 2 h `PUBLICATION_LAG` set their own `lag` in groups.to
   to 2026-11-21); `load_benchmark` reads it when the login can. Cost rules: one `init_time` per
   query, `ST_DWITHIN` on the points, lead from the array offset, `maximum_bytes_billed` = dry-run
   estimate + 10% (the estimate is ~750 GB, a run bills up to ~230 MB), stop above 1 GB billed. The
-  backfill billed 32 GB (plus 14 GB for an aborted first try). Live needs keyless Workload
-  Identity Federation on Modal (service-account keys are blocked by org policy); not done.
+  backfill billed 32 GB (plus 14 GB for an aborted first try).
+- **WeatherNext 3 live (2026-11-22, ready, off):** on Modal, `weathernext.credentials` uses keyless
+  Workload Identity Federation (service-account keys are blocked by org policy): Modal's OIDC
+  identity token is exchanged for service account `open-predico-wn` (pool and provider `modal`,
+  restricted to our workspace id, environment `main`, app `open-predico`); elsewhere ADC. The
+  image has the `weathernext` extra (~60 MB, imported only when used). Its archive goes to
+  `weather-private/archive/` (`groups.repo`, the same routing as the backfill; never
+  `benchmark`). Switch on: add `weather_be_wn3` to Belgium's groups in targets.toml, after the
+  GCP setup and a dry run ([docs/weathernext-live.md](docs/weathernext-live.md)) and once
+  commercial use is confirmed (DATA_SOURCES.md: to verify). If BigQuery fails, the lenient build
+  leaves the group out and `forecast` drops it on D+1; the run submits without it.
+- **WeatherNext licence:** WN3 values, above all those valid in the future, are never published.
+  They live only in `weather-private` and in `live-private/inputs/` (exact model inputs), which
+  must stay private. `publish` copies forecasts and only the input column names (`runs.parquet`
+  `features`); the dashboard shows names and groups.toml metadata, no input values (checked
+  2026-11-22). Any future publishing of inputs must skip `groups.repo(g) == hf.PRIVATE` groups.
 - **Live (production) since 2026-11-16:** `t0gamma_cov_ctx90` D+1 with all four weather runs and
   capacity (since 2026-11-15), climatology D+2..D+10.
 - **Intraday (2026-11-22):** Predico opens a challenge every hour (gate at the next full hour,

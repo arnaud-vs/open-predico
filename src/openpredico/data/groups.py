@@ -50,6 +50,12 @@ def load_groups(path: Path = CONFIGS / "groups.toml") -> dict[str, dict]:
     return groups
 
 
+def repo(group: str) -> str:
+    """HF dataset holding `group`: `hf.PRIVATE` if a column is licensed (PRIVATE_PREFIXES)."""
+    private = (c["source"].split(":")[0] in PRIVATE_PREFIXES for c in load_groups()[group].values())
+    return hf.PRIVATE if any(private) else "benchmark"
+
+
 def build(
     group: str, start: str, end: str, tz: str = TZ, lenient: bool = False, raw: dict | None = None
 ) -> pd.DataFrame:
@@ -194,10 +200,10 @@ def main() -> None:
     args = p.parse_args()
     groups, targets, raw = load_groups(), load_targets().values(), {}
     for group in args.groups.split(",") if args.groups else groups:
-        private = any(c["source"].split(":")[0] in PRIVATE_PREFIXES for c in groups[group].values())
-        repo = hf.PRIVATE if private else "benchmark"
+        name = repo(group)
+        private = name == hf.PRIVATE
         hf.HfApi().create_repo(
-            f"{hf.ORG}/{repo}", repo_type="dataset", private=private, exist_ok=True
+            f"{hf.ORG}/{name}", repo_type="dataset", private=private, exist_ok=True
         )
         # calendar columns in the time zone of the (first) target using the group
         tz = next((t["timezone"] for t in targets if group in t["groups"]), TZ)
@@ -205,7 +211,7 @@ def main() -> None:
         print(group, df.shape, df.isna().mean().round(3).to_dict(), flush=True)
         hf.upload(
             df,
-            repo,
+            name,
             f"{args.version}/{group}.parquet",
             f"{args.version}: {group} {args.start} to {args.end}",
         )

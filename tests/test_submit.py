@@ -192,3 +192,39 @@ def test_older_run_fills_d1_where_the_day_older_run_reaches(monkeypatch):
     assert out.loc["2026-11-24 12:00", "ghi_be"] == 1.0
     assert out.loc["2026-11-24 13:15":, "ghi_be"].isna().all()
     assert out["ghi_be_d2"].isna().all()
+
+
+def test_wn3_archive_is_private_and_a_bigquery_failure_drops_it(monkeypatch):
+    from openpredico.data import groups, weathernext
+    from openpredico.evaluation import experiment
+
+    tz, name = "Europe/Brussels", "belgium_solar_opendata_elia"
+    targets = experiment.load_targets()
+    targets[name]["groups"].append("weather_be_wn3")  # the live switch (PLAN.md)
+    monkeypatch.setattr(experiment, "load_targets", lambda: targets)
+    monkeypatch.setattr(submit, "live_targets", lambda: targets)
+    idx = pd.date_range("2026-08-01", "2026-11-15 23:00", freq="15min", tz="UTC", inclusive="left")
+    repos = []
+
+    def down(repo, path):
+        repos.append(repo)
+        return pd.DataFrame({c: 1.0 for c in groups.load_groups()["weather_be_wn3"]}, index=idx)
+
+    def fail(*a):
+        raise RuntimeError("BigQuery down")
+
+    monkeypatch.setattr(submit.hf, "download", down)
+    monkeypatch.setattr(submit.hf, "upload", lambda df, repo, *a: repos.append(repo))
+    monkeypatch.setattr(weathernext, "fetch", fail)
+    assert groups.repo("weather_be_wn3") == "weather-private"
+    assert groups.repo("weather_be") == "benchmark"
+    start, end = pd.Timestamp("2026-08-01", tz="UTC"), pd.Timestamp("2026-11-16 23:00", tz="UTC")
+    wn3 = submit.archived("weather_be_wn3", start, end, tz, save=True)
+    assert repos == ["weather-private"]  # read there; nothing new, so nothing saved
+    now = pd.Timestamp("2026-11-15 08:15", tz="UTC")  # D+1 session hour
+    frames = {"target_elia": pd.DataFrame({"solar_be": 5.0}, index=wn3.index)}
+    frames["weather_be_wn3"] = wn3
+    seen = {}
+    fc, _ = forecast(name, frames, _intraday_predict(seen), now)
+    validate(fc, now)
+    assert seen["future"] == []  # WN3 missing on D+1: left out, the run still submits

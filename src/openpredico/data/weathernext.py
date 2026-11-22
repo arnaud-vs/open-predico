@@ -1,8 +1,9 @@
 """Google DeepMind WeatherNext 3 forecasts from BigQuery, per area on the 15-min UTC grid.
 
 Table `open-predico.weathernext_3.weathernext_3_0_0_0p1deg` (0.1 deg, ensemble statistics; we
-read the `_mean`s), a linked dataset that Application Default Credentials can query
-(`gcloud auth application-default login`; extra `weathernext`). Hourly runs, 48 h ahead (00/06/12/18
+read the `_mean`s), a linked dataset (extra `weathernext`). Credentials (`credentials`): on Modal,
+keyless Workload Identity Federation (PLAN.md > Elia solar > WeatherNext 3); elsewhere Application
+Default Credentials (`gcloud auth application-default login`). Hourly runs, 48 h ahead (00/06/12/18
 UTC: 360 h). Runs land on GCS ~6h15-7h00 after init (Aug-Nov 2026); we assume LATENCY = 7h45.
 Runs before 2026-08-28 were written on 2026-08-27: reforecasts, not what was out at the time.
 
@@ -19,7 +20,10 @@ Keys (`weathernext:<area>.<variable>` in groups.toml): an area of AREAS and a va
 openmeteo.VARIABLES, same units as Open-Meteo.
 """
 
+import functools
 import itertools
+import os
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
@@ -138,10 +142,43 @@ nearest AS (
 SELECT k, i, {cols} FROM nearest, nearest.forecast f WITH OFFSET i"""
 
 
+# Workload Identity Federation (not secret): Modal's OIDC identity token is exchanged for a
+# short-lived token of SERVICE_ACCOUNT. Pool and provider are set up by hand (PLAN.md).
+SERVICE_ACCOUNT = f"open-predico-wn@{PROJECT}.iam.gserviceaccount.com"
+WIF = {
+    "type": "external_account",
+    "audience": "//iam.googleapis.com/projects/210233305810/locations/global/"
+    "workloadIdentityPools/modal/providers/modal",
+    "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+    "token_url": "https://sts.googleapis.com/v1/token",
+    "service_account_impersonation_url": "https://iamcredentials.googleapis.com/v1/projects/-/"
+    f"serviceAccounts/{SERVICE_ACCOUNT}:generateAccessToken",
+}
+
+
+@functools.cache
+def credentials():
+    """In a Modal container (MODAL_IDENTITY_TOKEN*): WIF credentials; else None (ADC). The token
+    is read from Modal's refreshed file, or written once to a private temp file; never logged."""
+    path = os.environ.get("MODAL_IDENTITY_TOKEN_FILE")
+    if not path and (token := os.environ.get("MODAL_IDENTITY_TOKEN")):
+        with tempfile.NamedTemporaryFile("w", suffix=".jwt", delete=False) as f:  # mode 0600
+            f.write(token)
+        path = f.name
+    if not path:
+        return None
+    from google.auth import identity_pool  # optional extra `weathernext`
+
+    info = WIF | {"credential_source": {"file": path}}
+    return identity_pool.Credentials.from_info(
+        info, scopes=["https://www.googleapis.com/auth/cloud-platform"]
+    )
+
+
 def _client():
     from google.cloud import bigquery  # optional extra `weathernext`
 
-    return bigquery.Client(project=PROJECT)
+    return bigquery.Client(project=PROJECT, credentials=credentials())
 
 
 def _config(**kwargs):

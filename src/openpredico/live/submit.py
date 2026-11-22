@@ -18,7 +18,7 @@ from huggingface_hub.errors import RemoteEntryNotFoundError
 
 from openpredico.config import live_targets
 from openpredico.data import hf, openmeteo
-from openpredico.data.groups import build, load_groups
+from openpredico.data.groups import build, load_groups, repo
 from openpredico.evaluation.backtest import clip, cut_past
 from openpredico.evaluation.experiment import CATEGORICAL, features, load_benchmark
 from openpredico.live.predico import Predico
@@ -31,13 +31,14 @@ MODEL = "theforecastingcompany/t0-gamma"  # best Apache-2.0 model in the backtes
 CONFIG, FALLBACK = "t0gamma_cov_ctx90", "slot_climatology_28d"  # backtest config names
 CONTEXT_DAYS = 90
 HORIZON_DAYS = 10
-ARCHIVE = "archive/{}.parquet"  # per non-calendar group, in the (public) benchmark repo
+ARCHIVE = "archive/{}.parquet"  # per non-calendar group, in its dataset (`groups.repo`)
 # Days refetched before an archive's frontier each run, per source; refetched values win.
 # ESIOS overwrites some forecasts after publication (PLAN: Benchmark), later revisions unchecked;
 # ENTSO-E revises A75 over 35 days (PLAN: 50Hertz); Elia's daily ods209 replaces the
-# near-real-time ods210 a day later; an Open-Meteo run never changes. The window costs one
-# request per series whatever its length (ESIOS chunks a month, ENTSO-E a year, Elia one export).
-REVISE = {"openmeteo": 0, "esios": 7, "elia": 7, "entsoe": 35}
+# near-real-time ods210 a day later; an Open-Meteo or WeatherNext run never changes. The window
+# costs one request per series whatever its length (ESIOS chunks a month, ENTSO-E a year, Elia
+# one export).
+REVISE = {"openmeteo": 0, "weathernext": 0, "esios": 7, "elia": 7, "entsoe": 35}
 STEP = pd.Timedelta("15min")
 
 
@@ -69,15 +70,16 @@ def build_frames(
 
 
 def archived(g: str, start: pd.Timestamp, end: pd.Timestamp, tz: str, save: bool) -> pd.DataFrame:
-    """Group `g` on [start, end) from its archive on HF (`benchmark/archive/<g>.parquet`),
+    """Group `g` on [start, end) from its archive on HF (`<repo>/archive/<g>.parquet`; licensed
+    groups in the private `hf.PRIVATE`, never `benchmark`: `groups.repo`),
     extended each run: only the days from its `frontier` on, minus its sources' REVISE window,
     are fetched, and fetched values win. Old days are kept (the growing backtest set). Seeded
     from the backtest backfill (`load_benchmark`) if there is no archive yet. `save` writes the
     archive back only when its frontier reached a later day: about one commit a day per group,
     even for hourly runs."""
-    columns = load_groups()[g]
+    columns, where = load_groups()[g], repo(g)
     try:
-        old = hf.download("benchmark", ARCHIVE.format(g))
+        old = hf.download(where, ARCHIVE.format(g))
     except RemoteEntryNotFoundError:  # no archive yet: seed from the backfill, else fetch it all
         # Only a missing file: any other error (HF down) raises, so a reseed never overwrites
         # the archive. Not LocalEntryNotFoundError either: that one means HF was unreachable.
@@ -94,7 +96,7 @@ def archived(g: str, start: pd.Timestamp, end: pd.Timestamp, tz: str, save: bool
     reached = frontier(merged, columns, tz)
     if save and reached is not None and (was is None or reached > was):
         msg = f"Archive {g}: through {reached:%Y-%m-%d}"
-        hf.upload(merged, "benchmark", ARCHIVE.format(g), msg)
+        hf.upload(merged, where, ARCHIVE.format(g), msg)
     grid = pd.date_range(start, end, freq="15min", inclusive="left", name="time")
     out = merged.reindex(grid)
     sources = {c: d["source"] for c, d in columns.items()}
