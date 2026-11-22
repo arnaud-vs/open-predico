@@ -8,6 +8,7 @@ Every source used by open-predico, its license, and whether it may be used live.
 | [ENTSO-E Transparency Platform](https://transparency.entsoe.eu/) | mFRR balancing energy bids (12.3.B/C, File Library), group `mfrr_bids` | ENTSO-E Transparency Platform terms of use: reuse allowed with source attribution; to confirm 12.3.B/C is on ENTSO-E's free re-use list | to confirm | "Source: ENTSO-E Transparency Platform" | not yet | pending terms |
 | [ENTSO-E Transparency Platform](https://transparency.entsoe.eu/) REST API | 50Hertz truth and features (`data/entsoe.py`): actual generation A75 (B16 solar, B18 wind offshore, B19 wind onshore), group `target_50hertz`; day-ahead wind/solar (A69) and load (A65) forecasts, group `entsoe_forecasts_50hertz` | ENTSO-E Transparency Platform terms of use: reuse allowed with source attribution | to confirm (A75/A69/A65 on ENTSO-E's free re-use list, to check) | "Source: ENTSO-E Transparency Platform" | German targets | pending terms |
 | [Open-Meteo](https://open-meteo.com/) Previous Runs API | 50Hertz and Belgian weather (`data/openmeteo.py`): ECMWF IFS (and ICON-D2 for Belgium) single runs; groups `weather_50hertz`, `weather_be`, `weather_be_d2` | Data CC BY 4.0; the free API is non-commercial only | **licence required for production** (API subscription; the maintainer buys it before production) | "Weather data by Open-Meteo.com" | German targets (playground) | pending terms |
+| [WeatherNext 3](https://deepmind.google/science/weathernext/) (Google DeepMind) via BigQuery | Belgian and 50Hertz weather for the backtest (`data/weathernext.py`): ensemble means, groups `weather_be_wn3`, `weather_50hertz_wn3` | WeatherNext data licence of the BigQuery linked dataset (`open-predico.weathernext_3`): no redistribution | to verify | to verify | not yet (needs keyless Workload Identity Federation on Modal) | **never public**: private HF `open-predico/weather-private` |
 | [Elia Open Data](https://opendata.elia.be/) | Belgian solar truth and Elia's forecast (`data/elia.py`): ods032 `measured`, `dayahead11h*`, region Belgium; groups `target_elia`, `tso_forecast_be` | Elia Open Data Licence (to read: portal was down on 2026-11-13) | to verify | "Source: Elia" | not yet (backtest) | pending terms |
 
 Add a row when you add a source.
@@ -55,6 +56,33 @@ province on 2026-10-25 (Flanders ~72%). ECMWF runs land ~6h40 after init (06 UTC
 on 2026-11-14), so Belgium's 09:00 origin (07:00 UTC in summer) reads the 00 UTC run of D-1.
 `weather_be_d2`: same points from DWD's ICON-D2 (2 km, 48 h, every 3 h), 03 UTC run of D-1 (lands
 ~1h55 after init); single runs archived since 2026-04-02 only.
+
+## WeatherNext 3 (BigQuery)
+
+Google DeepMind's WeatherNext 3 (0.1 deg, hourly runs since 2026, 48 h ahead; 00/06/12/18 UTC
+runs 360 h), table `open-predico.weathernext_3.weathernext_3_0_0_0p1deg` (a view over a linked
+dataset), read with Application Default Credentials (`uv sync --extra weathernext`). Per point
+of `openmeteo.POINTS` the nearest 0.1 deg cell (`ST_DISTANCE`), then the same weights as the
+Open-Meteo groups; units converted to Open-Meteo's (J/m2 per hour to W/m2, K to degC, 0-1 to %;
+diffuse = global - direct).
+
+- **Runs:** Belgium reads the 23 UTC run of D-2, Germany the 04 UTC run of D-1. Runs landed on
+  GCS 6h15-7h00 after init (Aug-Nov 2026; e.g. 23 UTC of 2026-11-20 at 05:06 UTC); we assume
+  7h45, so both are out at least 15 min before the 09:00 Brussels / 14:00 Berlin origin in
+  summer (07:00 / 12:00 UTC), and both cover the whole local target day.
+- **Vintage:** runs before 2026-08-28 were all written on 2026-08-27, i.e. reforecasts by the
+  current model, not what was available then. Backtest scores before that date may be optimistic
+  if that period overlaps the model's training data (to check).
+- **Cost:** BigQuery bills scanned bytes. Every query filters one `init_time` and the points'
+  cells (`ST_DWITHIN` of a MULTIPOINT, 8 km), and takes the lead from the array offset
+  (offset i = i+1 h ahead; selecting `hours` or `time` adds ~125 GB to the estimate). The
+  dry-run estimate is ~130 GB per selected column (~750 GB for ours) while a run bills up to ~230 MB;
+  BigQuery refuses a `maximum_bytes_billed` below the estimate, so a query may bill up to the
+  estimate + 10% and `fetch` stops when one bills over 1 GB. Never query without the
+  `init_time` filter. The 2026-04-03 to 2026-11-21 backfill (468 runs) billed 32 GB.
+- **Licence:** no redistribution: the groups live in the private dataset `weather-private`
+  (`groups.py` routes every group with a `weathernext:` column there); `load_benchmark` reads
+  it when the login can, else leaves the groups out.
 
 ## Elia Open Data
 

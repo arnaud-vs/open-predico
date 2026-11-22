@@ -36,15 +36,27 @@ def test_features_univariate_and_ablation():
 def test_load_benchmark_takes_each_group_from_its_latest_version(monkeypatch):
     files = ["v1/target.parquet", "v1/calendar.parquet", "v2/calendar_de.parquet",
              "v10/calendar.parquet", "v2/notes.md", "predictions/x/target.parquet"]  # fmt: skip
+    private = {"weather-private": ["v6/weather_be_wn3.parquet"]}
+
+    class Denied(experiment.HfHubHTTPError):
+        def __init__(self):
+            Exception.__init__(self, "401")
 
     class Api:
-        def list_repo_files(self, *args, **kwargs):
-            return files
+        readable = True
+
+        def list_repo_files(self, repo_id, **kwargs):
+            if repo_id.endswith("private") and not Api.readable:
+                raise Denied()
+            return private.get(repo_id.split("/")[1], files)
 
     monkeypatch.setattr(experiment, "HfApi", Api)
-    monkeypatch.setattr(experiment, "download", lambda repo, path: path)
+    monkeypatch.setattr(experiment, "download", lambda repo, path: f"{repo}/{path}")
     assert experiment.load_benchmark() == {
-        "target": "v1/target.parquet",
-        "calendar": "v10/calendar.parquet",
-        "calendar_de": "v2/calendar_de.parquet",
+        "target": "benchmark/v1/target.parquet",
+        "calendar": "benchmark/v10/calendar.parquet",
+        "calendar_de": "benchmark/v2/calendar_de.parquet",
+        "weather_be_wn3": "weather-private/v6/weather_be_wn3.parquet",
     }
+    Api.readable = False  # contributors: the licensed groups are left out
+    assert "weather_be_wn3" not in experiment.load_benchmark()

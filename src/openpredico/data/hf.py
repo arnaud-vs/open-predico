@@ -6,6 +6,8 @@ import pandas as pd
 from huggingface_hub import CommitOperationAdd, HfApi
 
 ORG = "open-predico"
+# Private dataset for benchmark groups whose licence forbids publishing them (WeatherNext 3).
+PRIVATE = "weather-private"
 
 
 def upload(df: pd.DataFrame, repo: str, path: str, message: str) -> None:

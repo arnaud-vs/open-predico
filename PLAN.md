@@ -190,7 +190,8 @@ published faster than the 2 h `PUBLICATION_LAG` set their own `lag` in groups.to
   2026-04-02), `weather_be_knmi` (KNMI HARMONIE-AROME 03 UTC run of D-1, out ~05:40 UTC; since
   2026-04-06) and `weather_be_aifs` (ECMWF AIFS 00 UTC run of D-1, out ~05:40 UTC; since
   2026-04-03), all over 11 province points weighted by PV capacity; `capacity_be` (Elia monitored
-  capacity, published ahead); `calendar`.
+  capacity, published ahead); `calendar`. Backtest only (not in targets.toml): `weather_be_wn3`
+  (WeatherNext 3, see below).
 - **Benchmark:** Elia's own forecast (`tso_forecast_be`, issued 11:00 D-1), Predico's owner
   benchmark, scored as config `elia_dayahead11h` (`experiment ... tso`).
 - **Backtest (2026-11-15, vs Elia's forecast `elia_dayahead11h`, ratio of mean RMSE / Winkler):**
@@ -204,6 +205,25 @@ published faster than the 2 h `PUBLICATION_LAG` set their own `lag` in groups.to
   (`t0gamma_cov_ecmwfd2_ctx90`); + capacity 1.138 / 1.021 (`..._cap_`); + KNMI 1.102 / 0.989
   (`..._knmi_`); + AIFS 1.102 / 0.976 (`..._aifs_`); all 1.076 / 0.958, full year 1.155 / 1.022
   (`t0gamma_cov_ctx90`, live). Capacity alone barely helps; KNMI and AIFS each ~4%.
+- **Ablation (2026-11-22, Elia lag 30 min; RMSE / Winkler ratio to Elia, coverage; 7 Apr to 25
+  Oct / 28 Aug to 25 Oct (WN3 real-time runs) / full year):** all (live, rerun)
+  1.079 / 0.945 / 89%, 1.088 / 0.911, 1.186 / 1.029 (`t0gamma_cov_ctx90`); all + WN3
+  1.047 / 0.912 / 89%, 1.062 / 0.896, 1.165 / 1.003 (`t0gamma_cov_wn3_ctx90`); WN3 instead of IFS
+  1.140 / 0.963, 1.039 / 0.881 (`t0gamma_cov_wn3_noifs_ctx90`; full year meaningless: no weather
+  before April). The 30 min lag alone moved all from 1.076 / 0.958 to 1.079 / 0.945. WN3 adds
+  ~3% on both scores; it doesn't replace IFS.
+- **WeatherNext 3 (`weather_be_wn3`, `weather_50hertz_wn3`; DATA_SOURCES.md):** Google DeepMind's
+  ensemble mean from BigQuery (`data/weathernext.py`), nearest 0.1 deg cell per point, same
+  weights. Belgium reads the 23 UTC run of D-2 (lands ~6h15-7h00 after init, assumed 7h45: out by
+  06:45 UTC, before the 07:00 UTC summer origin; covers through 23 UTC of D); Germany the 04 UTC
+  run of D-1 (out by 11:45 UTC, origin 12:00 UTC in summer). Runs before 2026-08-28 are
+  reforecasts written on 2026-08-27, hence the separate real-time window above. Licence: no
+  redistribution, so both groups live in the private HF dataset `weather-private` (v6, 2026-04-03
+  to 2026-11-21); `load_benchmark` reads it when the login can. Cost rules: one `init_time` per
+  query, `ST_DWITHIN` on the points, lead from the array offset, `maximum_bytes_billed` = dry-run
+  estimate + 10% (the estimate is ~750 GB, a run bills up to ~230 MB), stop above 1 GB billed. The
+  backfill billed 32 GB (plus 14 GB for an aborted first try). Live needs keyless Workload
+  Identity Federation on Modal (service-account keys are blocked by org policy); not done.
 - **Live (production) since 2026-11-16:** `t0gamma_cov_ctx90` D+1 with all four weather runs and
   capacity (since 2026-11-15), climatology D+2..D+10.
 - **Intraday (2026-11-22):** Predico opens a challenge every hour (gate at the next full hour,

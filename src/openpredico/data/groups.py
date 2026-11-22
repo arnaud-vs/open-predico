@@ -2,6 +2,7 @@
 
 Benchmark build: python -m openpredico.data.groups --start 2024-12-10 --end 2026-11-01 --version v1
     [--groups target_50hertz,calendar_de]
+Groups with a `weathernext:` column (licensed data) go to the private dataset `hf.PRIVATE`.
 """
 
 import argparse
@@ -13,12 +14,13 @@ import pandas as pd
 from dateutil.easter import easter
 
 from openpredico.config import CONFIGS, load_targets
-from openpredico.data import elia, entsoe, entsoe_bids, esios, hf, openmeteo
+from openpredico.data import elia, entsoe, entsoe_bids, esios, hf, openmeteo, weathernext
 
 TZ = "Europe/Madrid"  # ESIOS local time; calendar default (Spain's targets)
 COLUMN_KEYS = {"source", "geo", "fill", "availability", "lag"}
 AVAILABILITY = {"future", "past"}
-PREFIXES = {"esios", "calendar", "entsoe_bids", "entsoe", "openmeteo", "elia"}
+PREFIXES = {"esios", "calendar", "entsoe_bids", "entsoe", "openmeteo", "elia", "weathernext"}
+PRIVATE_PREFIXES = {"weathernext"}  # licence: never in the public benchmark
 # ponytail: bid ladder built locally by `entsoe_bids ladder` (File Library login needed), not
 # fetched here. Put it at this path before building the `mfrr_bids` group.
 BIDS_LADDER = CONFIGS.parent / "data" / "bids_ladder.parquet"
@@ -48,16 +50,19 @@ def load_groups(path: Path = CONFIGS / "groups.toml") -> dict[str, dict]:
     return groups
 
 
-def build(group: str, start: str, end: str, tz: str = TZ, lenient: bool = False) -> pd.DataFrame:
+def build(
+    group: str, start: str, end: str, tz: str = TZ, lenient: bool = False, raw: dict | None = None
+) -> pd.DataFrame:
     """One group's columns on the 15-min UTC grid [start, end), with `fill` applied.
 
     `tz`: the target's time zone, for `calendar:` columns. `lenient` (live runs): a column whose
-    source fails is left out instead of failing the build; TSFMs take any covariate set.
+    source fails is left out instead of failing the build; TSFMs take any covariate set. `raw`:
+    fetches to share with other groups built over the same span.
     """
     start, end = pd.Timestamp(start, tz="UTC"), pd.Timestamp(end, tz="UTC")
     grid = pd.date_range(start, end, freq="15min", inclusive="left", name="time")
     columns = load_groups()[group]
-    raw = {}  # one fetch per ESIOS id (shared by its geos) or Open-Meteo area, failures included
+    raw = {} if raw is None else raw  # one fetch per ESIOS id, Open-Meteo run, ...; failures too
     df = pd.DataFrame(index=grid)
     for name, c in columns.items():
         try:
@@ -90,6 +95,9 @@ def _column(c: dict, raw: dict, grid: pd.DatetimeIndex, start, end, tz: str) -> 
         return _once(raw, f"{prefix}{run}", lambda: openmeteo.fetch(start, end, areas))[area][
             variable
         ]
+    if prefix == "weathernext":  # every area at once: one query per run
+        area, variable = key.split(".")
+        return _once(raw, prefix, lambda: weathernext.fetch(start, end))[area][variable]
     values = _once(raw, key, lambda: esios.fetch_values(int(key), start, end))
     return to_grid(esios.to_series(values, int(key), c.get("geo"), start, end), grid)
 
@@ -184,16 +192,20 @@ def main() -> None:
     p.add_argument("--version", required=True)
     p.add_argument("--groups", help="comma-separated; default: every group")
     args = p.parse_args()
-    hf.HfApi().create_repo(f"{hf.ORG}/benchmark", repo_type="dataset", private=False, exist_ok=True)
-    targets = load_targets().values()
-    for group in args.groups.split(",") if args.groups else load_groups():
+    groups, targets, raw = load_groups(), load_targets().values(), {}
+    for group in args.groups.split(",") if args.groups else groups:
+        private = any(c["source"].split(":")[0] in PRIVATE_PREFIXES for c in groups[group].values())
+        repo = hf.PRIVATE if private else "benchmark"
+        hf.HfApi().create_repo(
+            f"{hf.ORG}/{repo}", repo_type="dataset", private=private, exist_ok=True
+        )
         # calendar columns in the time zone of the (first) target using the group
         tz = next((t["timezone"] for t in targets if group in t["groups"]), TZ)
-        df = build(group, args.start, args.end, tz)
+        df = build(group, args.start, args.end, tz, raw=raw)
         print(group, df.shape, df.isna().mean().round(3).to_dict(), flush=True)
         hf.upload(
             df,
-            "benchmark",
+            repo,
             f"{args.version}/{group}.parquet",
             f"{args.version}: {group} {args.start} to {args.end}",
         )

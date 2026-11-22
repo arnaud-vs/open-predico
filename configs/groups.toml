@@ -153,6 +153,25 @@ diffuse_radiation_be_aifs = { source = "openmeteo:be_aifs.diffuse_radiation", av
 cloud_cover_be_aifs = { source = "openmeteo:be_aifs.cloud_cover", availability = "future" }
 temperature_2m_be_aifs = { source = "openmeteo:be_aifs.temperature_2m", availability = "future" }
 
+# Google DeepMind WeatherNext 3 (BigQuery, data/weathernext.py), ensemble mean, 23 UTC run of
+# D-2, nearest 0.1 deg cell per point, same weights. Licensed: private HF dataset only.
+[weather_be_wn3]
+ghi_be_wn3 = { source = "weathernext:be_wn3.shortwave_radiation", availability = "future" }
+direct_radiation_be_wn3 = { source = "weathernext:be_wn3.direct_radiation", availability = "future" }
+diffuse_radiation_be_wn3 = { source = "weathernext:be_wn3.diffuse_radiation", availability = "future" }
+cloud_cover_be_wn3 = { source = "weathernext:be_wn3.cloud_cover", availability = "future" }
+temperature_2m_be_wn3 = { source = "weathernext:be_wn3.temperature_2m", availability = "future" }
+
+[weather_50hertz_wn3]  # WeatherNext 3, 04 UTC run of D-1, weather_50hertz's points. Private.
+wind_speed_100m_wn3 = { source = "weathernext:land_wn3.wind_speed_100m", availability = "future" }
+wind_speed_10m_wn3 = { source = "weathernext:land_wn3.wind_speed_10m", availability = "future" }
+wind_speed_100m_offshore_wn3 = { source = "weathernext:offshore_wn3.wind_speed_100m", availability = "future" }
+ghi_wn3 = { source = "weathernext:land_wn3.shortwave_radiation", availability = "future" }
+direct_radiation_wn3 = { source = "weathernext:land_wn3.direct_radiation", availability = "future" }
+diffuse_radiation_wn3 = { source = "weathernext:land_wn3.diffuse_radiation", availability = "future" }
+cloud_cover_wn3 = { source = "weathernext:land_wn3.cloud_cover", availability = "future" }
+temperature_2m_wn3 = { source = "weathernext:land_wn3.temperature_2m", availability = "future" }
+
 # Elia's own forecast (Predico's benchmark), scored as config `elia_dayahead11h`: not a model
 # input. Published 11:00 D-1, an hour after the gate.
 [tso_forecast_be]

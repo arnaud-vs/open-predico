@@ -20,10 +20,11 @@ from pathlib import Path
 
 import pandas as pd
 from huggingface_hub import HfApi
+from huggingface_hub.errors import HfHubHTTPError
 
 from openpredico.config import load_targets
 from openpredico.data.groups import load_groups
-from openpredico.data.hf import ORG, download
+from openpredico.data.hf import ORG, PRIVATE, download
 from openpredico.evaluation.backtest import backtest, clip
 from openpredico.models.baselines import slot_climatology
 
@@ -45,15 +46,22 @@ def load_benchmark(groups: set[str] | None = None) -> dict[str, pd.DataFrame]:
     """`groups` (default all) from the latest version folder (`v1/`, `v2/`, ...) holding each.
 
     Versions only add groups (v2: the 50Hertz ones); unpublished groups (`mfrr_bids`) are absent.
+    Licensed groups (WeatherNext) come from the private dataset if this login can read it.
     """
     groups, latest = groups or load_groups().keys(), {}
-    files = HfApi().list_repo_files(f"{ORG}/benchmark", repo_type="dataset")
-    for f in files:
-        version, _, name = f.partition("/")
-        group = name.removesuffix(".parquet")
-        if version[:1] == "v" and version[1:].isdigit() and group in groups:
-            latest[group] = max(latest.get(group, version), version, key=lambda v: int(v[1:]))
-    return {g: download("benchmark", f"{v}/{g}.parquet") for g, v in latest.items()}
+    for repo in ("benchmark", PRIVATE):
+        try:
+            files = HfApi().list_repo_files(f"{ORG}/{repo}", repo_type="dataset")
+        except HfHubHTTPError:  # private: maintainer only
+            print(f"{repo}: not readable, its groups left out")
+            continue
+        for f in files:
+            version, _, name = f.partition("/")
+            group = name.removesuffix(".parquet")
+            if version[:1] == "v" and version[1:].isdigit() and group in groups:
+                if int(version[1:]) >= int(latest.get(group, (repo, "v0"))[1][1:]):
+                    latest[group] = repo, version
+    return {g: download(repo, f"{v}/{g}.parquet") for g, (repo, v) in latest.items()}
 
 
 def features(
