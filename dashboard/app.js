@@ -182,7 +182,7 @@ const relClass = r => (r == null || Math.abs(r - 1) < 5e-4 ? "" : r < 1 ? "good"
 const relText = r => (r == null ? "no baseline" : `${f3(r)} × baseline`);
 
 // Colours per model family, dash per variant: the same config always looks the same.
-const FAMILY = [["slot_climatology", "--ink-soft"], ["t0", "--accent-ink"], ["chronos", "#3b6fd1"], ["timesfm", "#8a63d2"], ["timestral", "#d08a1e"]];
+const FAMILY = [["slot_climatology", "--ink-soft"], ["t0", "--accent-ink"], ["chronos", "#3b6fd1"], ["timesfm", "#8a63d2"], ["timestral", "#d08a1e"], ["timeh2o", "#1f9a8a"], ["ciproto", "#7a8f2a"]];
 const DASHES = [[], [7, 4], [2, 3], [10, 3, 2, 3], [4, 4], [1, 2]];
 let CONFIGS = [];
 function configStyle(name) {
@@ -197,21 +197,23 @@ const swatch = name => { const st = configStyle(name); return `<svg width="22" h
 // Config names as readable parts: t0gamma_cov_ecmwfd2_knmi_ctx90 -> t0-gamma, covariates, 90 d,
 // IFS + ICON-D2 + KNMI. `wx` = the market's weather models (weather.json), what a plain `cov`
 // config reads. Unknown parts land in `notes` as they are.
-const MODEL_NAMES = [["slot_climatology", "Climatology"], ["t0gamma", "t0-gamma"], ["chronos2", "Chronos-2"], ["timesfm3", "TimesFM 3"], ["timestral5m", "Timestral 5M"], ["timeh2o", "TimeH2O"], ["elia", "Elia (TSO)"], ["entsoe", "TSO (ENTSO-E)"]];
+const MODEL_NAMES = [["slot_climatology", "Climatology"], ["t0gamma", "t0-gamma"], ["chronos2", "Chronos-2"], ["timesfm3", "TimesFM 3"], ["timestral5m", "Timestral 5M"], ["timeh2o", "TimeH2O (H2O.ai)"], ["ciproto", "CI Proto (Continuous Intelligence)"], ["elia", "Elia (TSO)"], ["entsoe", "TSO (ENTSO-E)"]];
 const WX = { ecmwf: "IFS", icond2: "ICON-D2", knmi: "KNMI", aifs: "AIFS" };
 const wxShort = name => name.replace("ECMWF ", "").replace("KNMI HARMONIE-AROME", "KNMI");
 function parseConfig(name, wx = []) {
   const known = MODEL_NAMES.find(([p]) => name === p || name.startsWith(p + "_"));
   const parts = name.slice(known ? known[0].length : name.indexOf("_") + 1 || name.length).split("_").filter(Boolean);
   const r = { model: known ? known[1] : name.split("_")[0], cov: null, ctx: null, weather: null, notes: [] };
-  let explicit = null, without = [];
+  let explicit = null;
   for (const p of parts) {
     let x;
     if (p === "cov" || p === "uni") r.cov = p === "cov";
     else if ((x = p.match(/^ctx(\d+)$/) ?? p.match(/^(\d+)d$/))) r.ctx = +x[1];
     else if (p === "ecmwfd2") (explicit ??= []).push("IFS", "ICON-D2");
     else if (WX[p]) (explicit ??= []).push(WX[p]);
-    else if ((x = p.match(/^no(ecmwf|icond2)$/))) without.push(WX[x[1]]);
+    // the noX ablations predate KNMI and AIFS: IFS + ICON-D2 minus one
+    else if (p === "noecmwf") explicit = ["ICON-D2"];
+    else if (p === "noicond2") explicit = ["IFS"];
     else if (p === "cap") r.notes.push("+ PV capacity");
     else if ((x = p.match(/^o(\d\d)(\d\d)$/))) r.notes.push(`origin ${x[1]}:${x[2]}`);
     else if ((x = p.match(/^no(\d+)$/))) r.notes.push(`without ESIOS ${x[1]}`);
@@ -219,8 +221,7 @@ function parseConfig(name, wx = []) {
     else if (p === "a69") r.notes.push("day-ahead (A69)");
     else r.notes.push(p);
   }
-  // ponytail: a `noX` ablation may predate later weather groups, so it doesn't list the rest.
-  if (r.cov) r.weather = explicit ?? (without.length ? [`all but ${without.join(", ")}`] : wx.map(wxShort));
+  if (r.cov) r.weather = explicit ?? wx.map(wxShort);
   return r;
 }
 const cfgLabel = (name, wx) => {
