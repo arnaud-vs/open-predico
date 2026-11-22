@@ -56,15 +56,40 @@ def test_forecast_drops_a_weather_model_missing_on_d1_or_absent():
         "weather_be_knmi": knmi,
     }
     seen = {}
-
-    def predict(past, future, days):
-        seen.update(past=list(past.columns), future=list(future.columns))
-        grid = pd.date_range(days[0], periods=96, freq="15min").tz_convert("UTC")
-        return pd.DataFrame({"q10": 1.0, "q50": 2.0, "q90": 3.0}, index=grid)
-
-    fc, _ = forecast("belgium_solar_opendata_elia", frames, predict, now)
+    fc, _ = forecast("belgium_solar_opendata_elia", frames, _intraday_predict(seen), now)
     validate(fc, now)
-    assert seen == {"past": ["solar_be"], "future": ["ghi_be"]}
+    assert seen["past"] == ["solar_be"] and seen["future"] == ["ghi_be"]  # D+1 session hour
+
+
+def _intraday_predict(seen):
+    def predict(past, future, days, start):  # t0: from the end of past through the end of D+1
+        seen.update(past=list(past.columns), future=list(future.columns), past_end=past.index[-1])
+        stop = (days[0] + pd.Timedelta("1D")).tz_convert("UTC")
+        grid = pd.date_range(past.index[-1], stop, freq="15min")[1:-1]
+        out = pd.DataFrame({"q10": 1.0, "q50": 2.0, "q90": 3.0}, index=grid)
+        return out[out.index >= start]
+
+    return predict
+
+
+def test_intraday_forecast_starts_now_and_keeps_weather_missing_only_on_d1():
+    now = pd.Timestamp("2026-11-15 00:20", tz="UTC")  # Belgium 01:20: D+1 runs not out yet
+    idx = pd.date_range("2026-08-01", "2026-11-18", freq="15min", tz="UTC", inclusive="left")
+    weather = pd.DataFrame({"ghi_be": 1.0, "ghi_be_knmi": 1.0}, index=idx)
+    weather.loc[weather.index >= "2026-11-15 23:00"] = None  # D+1 (16 Nov) runs missing
+    weather.loc["2026-11-15 12:00", "ghi_be_knmi"] = None  # KNMI also missing a step today
+    frames = {
+        "target_elia": pd.DataFrame({"solar_be": 5.0}, index=idx),
+        "weather_be": weather[["ghi_be"]],
+        "weather_be_knmi": weather[["ghi_be_knmi"]],
+    }
+    seen = {}
+    fc, _ = forecast("belgium_solar_opendata_elia", frames, _intraday_predict(seen), now)
+    validate(fc, now)
+    assert seen["future"] == ["ghi_be"]  # kept with NaN on D+1; KNMI left out: gap today
+    assert seen["past_end"] == pd.Timestamp("2026-11-14 23:45", tz="UTC")  # 30 min Elia lag
+    assert fc.index[0] == pd.Timestamp("2026-11-15 00:30", tz="UTC")  # from now on
+    assert (fc.loc[:"2026-11-16 22:45", "model"] == "t0gamma_cov_ctx90").all()
 
 
 def test_archived_fetches_only_new_days_and_keeps_old_ones(monkeypatch):

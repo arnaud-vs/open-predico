@@ -26,9 +26,15 @@ def make_predict(
     covariates as extra context variates, forecast jointly with the target (only it is kept).
     `future`: known-future covariates through the end of the last target day.
     NaN is passed through: t0 masks missing values itself.
+    `start` (live intraday runs): keep the steps from then on instead of from the first day.
     """
 
-    def predict(past: pd.DataFrame, future: pd.DataFrame, days: pd.DatetimeIndex) -> pd.DataFrame:
+    def predict(
+        past: pd.DataFrame,
+        future: pd.DataFrame,
+        days: pd.DatetimeIndex,
+        start: pd.Timestamp | None = None,
+    ) -> pd.DataFrame:
         end = past.index[-1]
         ctx = past[past.index > end - pd.Timedelta(days=context_days)].asfreq(STEP)
         stop = (days.max() + pd.DateOffset(days=1)).tz_convert("UTC")  # calendar day: 92/96/100
@@ -43,6 +49,7 @@ def make_predict(
         )
         q = np.array(fc.quantiles[0, 0].tolist())  # (1, V, H, 3) -> the target's (H, 3)
         out = pd.DataFrame(np.sort(q, axis=1), index=grid, columns=["q10", "q50", "q90"])
-        return out[out.index >= days.min().tz_convert("UTC")]  # drop the roll-through to day D
+        first = days.min().tz_convert("UTC") if start is None else start
+        return out[out.index >= first]  # drop the roll-through to day D
 
     return predict

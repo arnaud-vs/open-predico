@@ -4,9 +4,34 @@ from collections.abc import Callable, Sequence
 
 import pandas as pd
 
-# ponytail: one fixed publication lag for all past data; ESIOS balancing data shows up ~1-1.5 h
-# late. Make it per column (from groups.toml) when features with other lags arrive.
+from openpredico.data.groups import load_groups
+
+# Default publication lag of past data (ESIOS balancing data shows up ~1-1.5 h late); a past
+# column's `lag` in groups.toml overrides it (Elia's measured PV: 30 min).
 PUBLICATION_LAG = pd.Timedelta(hours=2)
+LAGS = {
+    c: pd.Timedelta(d.get("lag", PUBLICATION_LAG))
+    for columns in load_groups().values()
+    for c, d in columns.items()
+    if d["availability"] == "past"
+}
+
+
+def cut_past(history: pd.Series | pd.DataFrame, cutoff: pd.Timestamp):
+    """What of `history` was published before `cutoff`: each past column up to its own lag.
+
+    Rows stop at the shortest lag; a slower column is NaN after its own. Other columns (future
+    ones, dropped from `past` by the caller) follow the rows.
+    """
+    names = [history.name] if isinstance(history, pd.Series) else list(history.columns)
+    lag = {c: LAGS[c] for c in names if c in LAGS}
+    first = min(lag.values(), default=PUBLICATION_LAG)
+    past = history[history.index < cutoff - first]
+    if slower := [c for c, v in lag.items() if v > first]:
+        past = past.copy()
+        for c in slower:
+            past.loc[past.index >= cutoff - lag[c], c] = float("nan")
+    return past
 
 
 def backtest(
@@ -27,7 +52,7 @@ def backtest(
     for day in days:
         d1 = (day - pd.DateOffset(days=1)).date()  # calendar day: safe across DST
         cutoff = pd.Timestamp(f"{d1} {origin}").tz_localize(day.tz).tz_convert("UTC")
-        past = history[history.index < cutoff - PUBLICATION_LAG]
+        past = cut_past(history, cutoff)
         target = pd.DatetimeIndex([day])
         if isinstance(history, pd.Series):
             out.append(predict(past, target))

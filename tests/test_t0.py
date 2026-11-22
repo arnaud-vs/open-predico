@@ -24,3 +24,17 @@ def test_backtest_with_covariates_on_dst_day():
     assert len(out) == 92
     assert out.index[0] == day[0].tz_convert("UTC")
     assert (out.q10 <= out.q50).all() and (out.q50 <= out.q90).all()
+
+
+def test_cut_past_applies_each_columns_own_lag():
+    from openpredico.evaluation.backtest import cut_past
+
+    idx = pd.date_range("2026-11-01", "2026-11-02", freq="15min", tz="UTC", inclusive="left")
+    hist = pd.DataFrame({"solar_be": 1.0, "mfrr_energy": 2.0, "qh_of_day": 3.0}, index=idx)
+    cutoff = pd.Timestamp("2026-11-01 12:00", tz="UTC")
+    past = cut_past(hist, cutoff)
+    assert past.index[-1] == pd.Timestamp("2026-11-01 11:15", tz="UTC")  # Elia: 30 min
+    two_hours = pd.Timestamp("2026-11-01 09:45", tz="UTC")
+    assert past.mfrr_energy.last_valid_index() == two_hours  # default lag
+    assert past.qh_of_day.notna().all()  # future columns follow the rows
+    assert cut_past(hist[["mfrr_energy"]], cutoff).index[-1] == two_hours

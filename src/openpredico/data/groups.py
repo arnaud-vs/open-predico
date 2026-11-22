@@ -16,7 +16,7 @@ from openpredico.config import CONFIGS, load_targets
 from openpredico.data import elia, entsoe, entsoe_bids, esios, hf, openmeteo
 
 TZ = "Europe/Madrid"  # ESIOS local time; calendar default (Spain's targets)
-COLUMN_KEYS = {"source", "geo", "fill", "availability"}
+COLUMN_KEYS = {"source", "geo", "fill", "availability", "lag"}
 AVAILABILITY = {"future", "past"}
 PREFIXES = {"esios", "calendar", "entsoe_bids", "entsoe", "openmeteo", "elia"}
 # ponytail: bid ladder built locally by `entsoe_bids ladder` (File Library login needed), not
@@ -32,7 +32,8 @@ def load_groups(path: Path = CONFIGS / "groups.toml") -> dict[str, dict]:
         for name, c in columns.items():
             where = f"{group}.{name}"
             if c.keys() - COLUMN_KEYS or not {"source", "availability"} <= c.keys():
-                raise ValueError(f"{where}: keys must be source, availability, [geo], [fill]")
+                raise ValueError(f"{where}: keys must be source, availability, [geo/fill/lag]")
+            pd.Timedelta(c.get("lag", "0min"))  # raises on an invalid lag
             if c["availability"] not in AVAILABILITY:
                 raise ValueError(f"{where}: availability must be one of {sorted(AVAILABILITY)}")
             if c["source"].split(":")[0] not in PREFIXES:

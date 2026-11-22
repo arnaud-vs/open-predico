@@ -1,8 +1,9 @@
-"""Daily live run: t0-gamma D+1 (the target's groups as covariates, 90-day context) plus
-slot-climatology D+2..D+10 for every target -> HF live-private -> Predico.
+"""Live run: t0-gamma D+1 (the target's groups as covariates, 90-day context; intraday targets
+from now) plus slot-climatology D+2..D+10 for every target -> Predico -> HF live-private.
 
 Usage: python -m openpredico.live.submit [--dry-run] [--target a,b] [--check]
-       --dry-run skips HF and Predico; --target limits the run to these targets.
+       --dry-run skips HF and Predico; --target limits the run to these targets;
+       --check is one scheduler tick (`check_and_retry`).
 Needs the t0 extra: `uv sync --extra t0`.
 """
 
@@ -17,7 +18,7 @@ from huggingface_hub.errors import RemoteEntryNotFoundError
 from openpredico.config import live_targets
 from openpredico.data import hf
 from openpredico.data.groups import build, load_groups
-from openpredico.evaluation.backtest import PUBLICATION_LAG, clip
+from openpredico.evaluation.backtest import clip, cut_past
 from openpredico.evaluation.experiment import CATEGORICAL, features, load_benchmark
 from openpredico.live.predico import Predico
 from openpredico.live.wind_pair_consumer import needs_retry as pair_needs_retry
@@ -117,7 +118,11 @@ def frontier(df: pd.DataFrame, columns: dict, tz: str) -> pd.Timestamp | None:
 def forecast(
     target: str, frames: dict[str, pd.DataFrame], predict: Callable, now: pd.Timestamp
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """(forecast D+1..D+10 within 240 h, exact model inputs). Same cut as the backtest."""
+    """(forecast D+1..D+10 within 240 h, exact model inputs). Same cut as the backtest.
+
+    `intraday` targets (hourly challenges) are forecast from now: t0 covers the rest of today
+    and D+1, climatology the days after.
+    """
     t = live_targets()[target]
     tz = t["timezone"]
     # ponytail: the >90%-missing column drop is decided on the live window, not the backtest's
@@ -126,15 +131,26 @@ def forecast(
         now.tz_convert(tz).normalize() + pd.Timedelta(days=1), periods=HORIZON_DAYS, tz=tz
     )
     stop = (days[0] + pd.DateOffset(days=1)).tz_convert("UTC")
-    past = history[history.index < now - PUBLICATION_LAG]
+    past = cut_past(history, now)
     future = history.loc[history.index < stop, future_cols]
-    late = [c for c in future_cols if future.loc[future.index >= days[0], c].isna().any()]
+    # Known-future columns are needed on D+1; intraday runs need them on the rest of today, and
+    # on D+1 only in its session hour (its gate counts): earlier, D+1 weather isn't out yet (the
+    # D-1 run of D+1 lands ~07 UTC) and t0 gets those gaps as NaN (it masks them).
+    # ponytail: the backtest never saw NaN known-future inputs; later runs replace those steps.
+    intraday = t.get("intraday", False)
+    lo, hi = (now, stop if d1_session(t, now) else days[0]) if intraday else (days[0], stop)
+    needed = (future.index >= lo) & (future.index < hi)
+    late = [c for c in future_cols if future.loc[needed, c].isna().any()]
     if late:  # left out rather than filled: TSFMs take any covariate set
-        print(f"{target}: left out, known-future columns with gaps on D+1: {late}")  # names
+        print(f"{target}: left out, known-future columns with gaps: {late}")  # names
         future_cols = [c for c in future_cols if c not in late]
         future, past = future[future_cols], past.drop(columns=late)
     past = past.drop(columns=future_cols)
-    d1 = predict(past, future, days[:1])
+    if intraday:
+        d1 = predict(past, future, days[:1], start=now)
+        d1 = d1[d1.index > now]
+    else:
+        d1 = predict(past, future, days[:1])
     rest = slot_climatology(past.iloc[:, 0], days[1:], tz=tz)  # D+2..D+10: unpaid fallback
     fc = clip(pd.concat([d1.assign(model=CONFIG), rest.assign(model=FALLBACK)]), t)
     # Predico accepts at most 240 h ahead, so the tail of D+10 is cut
@@ -179,8 +195,11 @@ def main(dry_run: bool, only: list[str] | None = None) -> None:
         print(f"{name}: submitted")
         env = "playground" if "playground" in client.api else "production"
         run = f"{name}/{now:%Y-%m-%dT%H%MZ}"
-        hf.upload(fc.assign(env=env), "live-private", f"forecasts/{run}.parquet", f"Forecast {run}")
-        hf.upload(inputs, "live-private", f"inputs/{run}.parquet", f"Inputs {run}")
+        # intraday runs outside the D+1 session under intraday/: publish reads forecasts/ only
+        where = "intraday/" if target.get("intraday") and not d1_session(target, now) else ""
+        files = {f"{where}forecasts/{run}.parquet": fc.assign(env=env)}
+        files[f"{where}inputs/{run}.parquet"] = inputs
+        hf.upload_many(files, "live-private", f"Run {run}")  # one commit
     if client:
         print("coverage:", client.coverage())
 
@@ -212,55 +231,53 @@ def hindcast(first: str, last: str, only: list[str]) -> None:
             fc, inputs = forecast(name, built[key], predict, now)
             validate(fc, now)
             run = f"{name}/{now:%Y-%m-%dT%H%MZ}"
-            hf.upload(fc.assign(env="hindcast"), "live-private", f"forecasts/{run}.parquet", run)
-            hf.upload(inputs, "live-private", f"inputs/{run}.parquet", f"Inputs {run}")
+            files = {f"forecasts/{run}.parquet": fc.assign(env="hindcast")}
+            files[f"inputs/{run}.parquet"] = inputs
+            hf.upload_many(files, "live-private", f"Hindcast {run}")
             print(f"{run}: hindcast saved")  # no values
 
 
+def d1_session(t: dict, now: pd.Timestamp) -> bool:
+    """Whether target `t`'s D+1 session is open now: the hour before its gate, local time."""
+    local = now.tz_convert(t["timezone"])
+    gate = pd.Timestamp(f"{local:%Y-%m-%d} {t['gate']}").tz_localize(t["timezone"])
+    return gate - pd.Timedelta("1h") <= local < gate
+
+
 def in_session(now: pd.Timestamp) -> list[str]:
-    """Targets whose D+1 session is open now: the hour before their gate, local time."""
-    out = []
-    for name, t in live_targets().items():
-        local = now.tz_convert(t["timezone"])
-        gate = pd.Timestamp(f"{local:%Y-%m-%d} {t['gate']}").tz_localize(t["timezone"])
-        if gate - pd.Timedelta("1h") <= local < gate:
-            out.append(name)
-    return out
+    """Targets to forecast now: those in their D+1 session, and `intraday` ones always (Predico
+    opens one of their challenges every hour, gate at the next full hour)."""
+    return [n for n, t in live_targets().items() if t.get("intraday") or d1_session(t, now)]
 
 
 def not_ready(client: Predico, now: pd.Timestamp) -> list[str]:
-    """Our targets with an open D+1 challenge that our forecasts don't fully cover yet.
-
-    Challenges starting before the target's next local midnight are intraday (Belgium, hourly):
-    our forecast starts at D+1, so they are never covered and not counted.
-    """
+    """Our targets with an open challenge that our forecasts don't fully cover yet."""
     cov = {c["challenge_id"]: c for c in client.coverage()["data"]["coverage"]}
     out = []
     for t in live_targets().values():
-        tomorrow = now.tz_convert(t["timezone"]).normalize() + pd.DateOffset(days=1)
         for c in client.open_challenges(t["predico_resource"]):
-            row = cov.get(c["id"], {})
-            if row.get("start") and pd.Timestamp(row["start"]) < tomorrow:
-                continue  # ponytail: intraday not forecast; add a from-now run to cover it
-            if not row.get("ready"):
+            if not cov.get(c["id"], {}).get("ready"):
                 out.append(c["resource_name"])
     return out
 
 
 def not_run(now: pd.Timestamp, files: list[str]) -> list[str]:
-    """Targets in session without a live run archived today (`files`: live-private paths).
+    """Targets in session without a live run archived (`files`: live-private paths) today, or
+    this hour for `intraday` targets.
 
     Predico's coverage can't tell: yesterday's climatology D+2 already covers today's challenge.
     """
-    return [
-        n
-        for n in in_session(now)
-        if not any(f.startswith(f"forecasts/{n}/{now:%Y-%m-%d}T") for f in files)
-    ]
+    targets, out = live_targets(), []
+    for n in in_session(now):
+        stamp = f"{now:%Y-%m-%dT%H}" if targets[n].get("intraday") else f"{now:%Y-%m-%d}T"
+        runs = (f"forecasts/{n}/{stamp}", f"intraday/forecasts/{n}/{stamp}")
+        if not any(f.startswith(runs) for f in files):
+            out.append(n)
+    return out
 
 
 def missing(client: Predico, now: pd.Timestamp) -> list[str]:
-    """Targets in session to (re)submit: not covered on Predico, or no t0 run of ours today.
+    """Targets in session to (re)submit: not covered on Predico, or without a run (`not_run`).
 
     Only targets in session: a challenge open hours before its gate is never forecast early.
     """
