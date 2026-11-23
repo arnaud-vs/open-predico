@@ -219,7 +219,14 @@ published faster than the 2 h `PUBLICATION_LAG` set their own `lag` in groups.to
   1.047 / 0.912 / 89%, 1.062 / 0.896, 1.165 / 1.003 (`t0gamma_cov_wn3_ctx90`); WN3 instead of IFS
   1.140 / 0.963, 1.039 / 0.881 (`noifs` run, removed 2026-11-22: an odd ablation). The 30 min
   lag alone moved all from 1.076 / 0.958 to 1.079 / 0.945. WN3 adds ~3% on both scores; it
-  doesn't replace IFS.
+  doesn't replace IFS. WN3 as the only weather 1.136 / 1.024, 1.152 / 0.944
+  (`t0gamma_cov_wn3only_ctx90`): alone it's worse than the four Open-Meteo models together.
+- **Other TSFMs (2026-11-23, all weather incl. WN3, 7 Apr to 25 Oct, RMSE / Winkler ratio to
+  Elia):** t0-gamma 1.023 / 0.912, Chronos-2 0.977 / 0.904, TimesFM 3 0.985 / 0.899 (weights
+  non-commercial), TimeH2O 1.057 / 1.009 (weights non-commercial); CI Proto swapped on a 16 GB
+  laptop (stopped after 14 h; run alone or on Modal). Equal-weight quantile averages beat each
+  member: t0 + Chronos-2 0.946 / 0.865 (best live-eligible pair), + TimesFM 3 0.934 / 0.851, all
+  four 0.927 / 0.856.
 - **WeatherNext 3 (`weather_be_wn3`, `weather_50hertz_wn3`; DATA_SOURCES.md):** Google DeepMind's
   ensemble mean from BigQuery (`data/weathernext.py`), nearest 0.1 deg cell per point, same
   weights. Belgium reads the 23 UTC run of D-2 (lands ~6h15-7h00 after init, assumed 7h45: out by
