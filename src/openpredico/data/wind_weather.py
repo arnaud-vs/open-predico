@@ -91,6 +91,7 @@ def decode_run(record: dict) -> pd.DataFrame:
     for n, response in enumerate(record["responses"], 1):
         frame = pd.DataFrame(response["hourly"])
         frame.index = pd.to_datetime(frame.pop("time"), utc=True)
+        frame = frame.astype(float)  # an all-null field arrives as object dtype with None
         if frame.index.has_duplicates or not frame.index.is_monotonic_increasing:
             raise ValueError("invalid run timestamps")
         units = response["hourly_units"]

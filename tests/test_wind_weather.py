@@ -39,6 +39,13 @@ def test_decode_preserves_point_channels_and_circular_direction():
     assert str(out.index.tz) == "UTC"
 
 
+def test_decode_turns_an_all_null_field_into_nan():
+    r = record()
+    r["responses"][0]["hourly"]["wind_direction_120m"] = [None, None]
+    out = weather.decode_run(r)
+    assert out.sin_p1.isna().all() and out.speed_p1.notna().all()
+
+
 def test_runs_use_prior_local_calendar_date_across_dst():
     assert weather.run_time("2026-03-30", "icon_eu") == pd.Timestamp("2026-03-29T06:00Z")
     assert weather.run_time("2026-10-26", "gfs_global") == pd.Timestamp("2026-10-25T00:00Z")
