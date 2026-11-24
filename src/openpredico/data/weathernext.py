@@ -84,12 +84,13 @@ def fetch(start, end, areas=None, client=None) -> dict[str, pd.DataFrame]:
             print(f"weathernext {area}: no run for {day:%Y-%m-%d}, left empty")
             continue
         parts[area].append(hourly[(hourly.index >= lo) & (hourly.index < hi)])
-    out = {}
-    for area, frames in parts.items():
-        if not frames:
-            raise ValueError(f"weathernext {area}: no run for any day")
-        out[area] = pd.concat(frames).reindex(grid, method="ffill", limit=3)  # hour -> quarters
-    return out
+    # An area with no run yet is absent (its columns fail alone): Germany's 04 UTC run lands
+    # ~12:45 Brussels, after Belgium's 09:00 origin, and must not take Belgium down with it.
+    return {
+        area: pd.concat(frames).reindex(grid, method="ffill", limit=3)  # hour -> quarters
+        for area, frames in parts.items()
+        if frames
+    }
 
 
 def _run(client, run: pd.Timestamp, areas: list[str]) -> dict[str, pd.DataFrame]:

@@ -48,6 +48,30 @@ def test_fetch_assembles_one_query_per_run(monkeypatch):
     assert df.cloud_cover.iloc[0] == 100 and len(df) == 96 and not df.isna().any().any()
 
 
+def test_fetch_leaves_out_an_area_whose_run_is_not_out_yet(monkeypatch):
+    cols = {c for c, _, _ in weathernext.COLUMNS.values()}
+    n = len(openmeteo.POINTS["be"])
+    rows = [{"k": k, "i": i, **{c: 1.0 for c in cols}} for k in range(n) for i in range(48)]
+
+    class Job:
+        total_bytes_processed = total_bytes_billed = 10**7
+
+        def __init__(self, sql):
+            self.sql = sql
+
+        def result(self, timeout):  # Germany's 04 UTC run is not out yet
+            return [] if "04:00:00" in self.sql else rows
+
+    class Client:
+        def query(self, sql, job_config):
+            return Job(sql)
+
+    monkeypatch.setattr(weathernext, "_config", dict)
+    start, end = (pd.Timestamp(t, tz="UTC") for t in ("2026-06-01 22:00", "2026-06-02 22:00"))
+    out = weathernext.fetch(start, end, ["be_wn3", "land_wn3"], Client())
+    assert list(out) == ["be_wn3"] and out["be_wn3"].notna().all().all()
+
+
 def test_credentials_use_modal_identity_token_else_adc(monkeypatch, tmp_path):
     import pytest
 
