@@ -62,6 +62,14 @@ def test_commercial_guard_and_error_never_echo_key(monkeypatch):
     assert str(error.value) == "point-weather HTTP 503"
 
 
+def test_fetch_rejects_a_run_with_an_all_null_field(monkeypatch):
+    hourly = {"time": ["2026-11-20T00:00"], "wind_speed_100m": [None], "wind_direction_100m": [1.0]}
+    response = SimpleNamespace(ok=True, json=lambda: {"hourly": hourly})
+    monkeypatch.setattr(weather.requests, "get", lambda *a, **kw: response)
+    with pytest.raises(ValueError, match="incomplete"):
+        weather.fetch_run("2026-11-21", "gfs_global", [(54.0, 13.0)])
+
+
 def test_blend_orders_and_missing_sources_keep_eu_fallback():
     raw = np.ones((2, 6, 4, 4))
     raw[:, :, 0, 0] = np.arange(6)[None, :] + 5

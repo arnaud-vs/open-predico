@@ -69,6 +69,10 @@ def fetch_run(
     locations = locations if isinstance(locations, list) else [locations]
     if len(locations) != len(points):
         raise ValueError("point-weather location count differs")
+    # Raise before callers cache the record: a field null at every hour (gfs_global on
+    # 2026-11-20) means the run isn't fully out; a cached copy would fail every later day.
+    if any(all(v is None for v in h) for loc in locations for h in loc["hourly"].values()):
+        raise ValueError("point-weather run incomplete")
     return {
         "model": model,
         "run_utc": run.isoformat(),
